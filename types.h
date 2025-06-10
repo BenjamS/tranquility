@@ -173,6 +173,7 @@ const VendorOUI vendorTable[] = {
   {{0x08, 0xAA, 0x55}, "Motrla"},
   {{0x54, 0x27, 0x58}, "Motrla"},
   {{0x00, 0xBD, 0x3E}, "Vizio"},
+  {{0x8C, 0x3B, 0x4A}, "UGSICo"} //Universal Global Scientific Industrial Co., Ltd.
 };
 
 const size_t vendorCount = sizeof(vendorTable) / sizeof(vendorTable[0]);

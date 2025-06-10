@@ -571,9 +571,9 @@ void debugPrintGlobalInfo(const DeviceCapture& cap) {
 
 void printGlobalMacStats() {
   Serial.println(F("\n📊 Device Summary After Scan"));
-  Serial.println(F("MAC(ven)      Combos            Pkts   LenAvg/Std   Chs    RSSImin/max  First/Last (s)"));
+  Serial.println(F("MAC(ven)                     Combos            Pkts   LenAvg/Std   Chs    RSSImin/max  First/Last (s)"));
   Serial.println(F("---------------------------------------------------------------------------------------------------------"));
-
+  int ephemeralProberCount = 0;
   for (const auto& kv : macStatsMap) {
     const String& mac = kv.first;
     const MacStats& stats = kv.second;
@@ -582,22 +582,8 @@ void printGlobalMacStats() {
     if (stats.packetCount == 0) continue;
 
     // MAC vendor (sender)
-    String macShort = mac.substring(0, 8);  // first 3 bytes
+    String macShort = mac;//mac.substring(0, 8);  // first 3 bytes
     String vendor = stats.vendor;
-
-    // Receiver MAC purpose
-    //String rxSummaryStr;
-    //for (const String& entry : stats.rxMacSummaries) {
-    //  if (!rxSummaryStr.isEmpty()) rxSummaryStr += "|";
-    //    rxSummaryStr += entry;
-    //}
-
-    // BSSID+Vendor
-    //String bssidSummaryStr;
-    //for (const String& entry : stats.bssidSummaries) {
-    //  if (!bssidSummaryStr.isEmpty()) bssidSummaryStr += "|";
-    //    bssidSummaryStr += entry;
-    //}
 
     // Combo list
     String comboStr;
@@ -607,6 +593,22 @@ void printGlobalMacStats() {
       char abbrev[16];
       snprintf(abbrev, sizeof(abbrev), "%u%02X%u%u ", k.type, k.subtype, k.direction, count);
       comboStr += abbrev;
+    }
+
+    // Time seen
+    uint32_t first = stats.firstSeen / 1000;
+    uint32_t last  = stats.lastSeen  / 1000;
+
+    // Set aside ephemeral probers to declutter table
+    comboStr.trim();
+    if (vendor == "Unknwn" &&
+      stats.packetCount <= 3 &&
+      (comboStr == "00411" || comboStr == "00412") &&
+      (last - first <= 2) &&
+      stats.rxMacSummaries.count("FF:FF:FF(BC)") &&
+      stats.bssidSummaries.count("FF:FF:FF(Unknwn)")) {
+      ephemeralProberCount++;
+      continue;  // ✅ Don't print this device in the table
     }
 
     // Length mean/std dev
@@ -620,11 +622,6 @@ void printGlobalMacStats() {
     // RSSI
     int8_t rssiMin = stats.rssiMin;
     int8_t rssiMax = stats.rssiMax;
-
-    // Time seen
-    uint32_t first = stats.firstSeen / 1000;
-    uint32_t last  = stats.lastSeen  / 1000;
-
 
     // Print row
     Serial.printf("%-10s %-20s   %3u  %5.1f/%-5.1f   %s  %3d/%-3d     %5lus/%5lus\n",
@@ -659,10 +656,13 @@ void printGlobalMacStats() {
     }
 
 
-
   } // End for loop
 
   Serial.println("-----------------------------------------------------------------------------------------------------\n");
+  if (ephemeralProberCount > 0) {
+  Serial.printf("📉 %d ephemeral probers (1–2 probe requests, short lifespan, unknown vendor)\n", ephemeralProberCount);
+}
+
 }
 
 
