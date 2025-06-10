@@ -1,6 +1,10 @@
 #include "parsers.h"
 #include "esp_wifi.h"
 #include <stdio.h>
+#include <SD.h>
+#include "nvs_flash.h"
+
+#define SD_CS 5  // or your CS pin
 
 std::map<String, MacStats> macStatsMap;
 std::map<FrameStatKey, int> globalFrameStats;
@@ -15,7 +19,257 @@ const char* directionToStr(FrameDirection dir) {
   }
 }
 
-// === YOUR FULL parseGlobalItems AND parseDataFrame GO HERE ===
+//=============================================================
+// Helpers
+//=============================================================
+String abbreviateMacPurpose(const String& purpose) {
+  if (purpose == "Broadcast") return "BC";
+  if (purpose == "IPv6 mDNS (33:33:00:00:00:01)") return "mDNS6";
+  if (purpose == "IPv6 Multicast") return "MC6";
+  if (purpose == "IPv4 mDNS (224.0.0.251)") return "mDNS4";
+  if (purpose == "SSDP / UPnP (239.255.255.250)") return "SSDP";
+  if (purpose == "IPv4 Multicast (01:00:5E)") return "MC4";
+  if (purpose == "IEEE Reserved Multicast") return "IEEE";
+  if (purpose == "Cisco Discovery Protocol (CDP)") return "CDP";
+  if (purpose == "LLDP (Link Layer Discovery Protocol)") return "LLDP";
+  if (purpose == "Multicast (Unknown or Vendor-Specific)") return "MC?";
+  return purpose; //If no match then assume its a vendor name (Unicast) and pass through
+}
+
+void initSD() {
+  if (!SD.begin(SD_CS)) {
+    Serial.println("[ERROR] SD card initialization failed!");
+  } else {
+    Serial.println("[INFO] SD card initialized.");
+  }
+}
+
+String getScanTimestamp() {
+  unsigned long ms = millis();
+  int sec = ms / 1000;
+  int min = (sec / 60) % 60;
+  int hr  = (sec / 3600) % 24;
+  char buf[12];
+  snprintf(buf, sizeof(buf), "%02d:%02d:%02d", hr, min, sec % 60);
+  return String(buf);
+}
+String formatTimestamp(unsigned long ms) {
+  int sec = ms / 1000;
+  int min = (sec / 60) % 60;
+  int hr  = (sec / 3600) % 24;
+  char buf[12];
+  snprintf(buf, sizeof(buf), "%02d:%02d:%02d", hr, min, sec % 60);
+  return String(buf);
+}
+String lookupVendor(const uint8_t* mac) {
+  for (size_t i = 0; i < vendorCount; ++i) {
+    if (memcmp(mac, vendorTable[i].prefix, 3) == 0) {
+      return vendorTable[i].name;
+    }
+  }
+  return "Unknwn";
+}
+// Convert bitmask → channel list string
+String formatChannelList(uint16_t mask) {
+  String result = "";
+  for (int i = 0; i < 13; i++) {
+    if (mask & (1 << i)) {
+      if (result.length() > 0) result += ",";
+      result += String(i + 1);
+    }
+  }
+  return result;
+}
+String extractAsciiPayloadFromDF(const uint8_t* payload, uint16_t len) {
+  String result = "";
+  String temp = "";
+  for (uint16_t i = 0; i < len; i++) {
+    char c = (char)payload[i];
+    if (isPrintable(c)) {
+      temp += c;
+    } else {
+      if (temp.length() >= 3) {
+        if (!result.isEmpty()) result += "|";
+        result += temp;
+      }
+      temp = "";
+    }
+  }
+  // Add any trailing valid string
+  if (temp.length() >= 3) {
+    if (!result.isEmpty()) result += "|";
+    result += temp;
+  }
+  return result;
+}
+
+String hexDump(const uint8_t* data, int len) {
+  char buf[4];  // enough for 2-digit hex + null + separator
+  String out = "";
+  for (int i = 0; i < len; ++i) {
+    if (i > 0) out += ":";
+    sprintf(buf, "%02X", data[i]);
+    out += buf;
+  }
+  return out;
+}
+
+void parseUnknownAsciiIe(uint8_t tagNumber, const uint8_t* tagData, uint8_t tagLength, String& asciiStorage) {
+  const uint8_t knownTags[] = {
+    0x00, 0x01, 0x03, 0x05, 0x07, 0x0B, 0x2A, 0x2D, 0x32,
+    0x3D, 0x30, 0xDD, 0x7F, 0x46, 0x23, 0x22, 0x24, 0x36
+  };
+
+  for (uint8_t i = 0; i < sizeof(knownTags); ++i)
+    if (tagNumber == knownTags[i]) return;
+
+  if (tagLength < 4) return;
+
+  bool asciiLike = true;
+  for (int i = 0; i < tagLength; ++i) {
+    char c = tagData[i];
+    if (c < 32 || c > 126) {
+      asciiLike = false;
+      break;
+    }
+  }
+
+  if (!asciiLike) return;
+
+  // Construct result
+  String result = "";
+  for (int i = 0; i < tagLength; ++i)
+    result += (char)tagData[i];
+
+  // Skip duplicates
+  if (asciiStorage.indexOf(result) != -1) return;
+
+  // Truncate if too long
+  const int MAX_ASCII_TOTAL_LEN = 100;
+  if (asciiStorage.length() + result.length() + 1 > MAX_ASCII_TOTAL_LEN) return;
+
+  // Store it
+  if (asciiStorage.length()) asciiStorage += ";";
+  asciiStorage += result;
+
+  // 🔥 Only print *once*, when it is new:
+  Serial.printf("  [ASCII Tag] 0x%02X (%-3d): \"%s\"\n", tagNumber, tagNumber, result.c_str());
+}
+
+void printIEsDebug(const uint8_t* ieData, int ieLen) {
+  Serial.println("[DEBUG] Scanning Information Elements:");
+  int pos = 0;
+
+  while (pos + 2 <= ieLen) {
+    uint8_t tagNumber = ieData[pos];
+    uint8_t tagLength = ieData[pos + 1];
+
+    if (pos + 2 + tagLength > ieLen) {
+      Serial.printf("  [WARN] IE tag 0x%02X at offset %d exceeds bounds\n", tagNumber, pos);
+      break;
+    }
+
+    // Identify tag name
+    String tagName;
+    switch (tagNumber) {
+      case 0x00: tagName = "SSID"; break;
+      case 0x01: tagName = "Supported Rates"; break;
+      case 0x03: tagName = "DS Parameter Set (Channel)"; break;
+      case 0x32: tagName = "Extended Supported Rates"; break;
+      case 0x30: tagName = "RSN"; break;
+      case 0x2A: tagName = "Power Capability"; break;
+      case 0x2B: tagName = "Supported Channels"; break;
+      case 0x46: tagName = "QoS Capability"; break;
+      case 0x36: tagName = "HT Capabilities"; break;
+      case 0x3D: tagName = "HT Information"; break;
+      case 0x2D: tagName = "HT Capabilities"; break;
+      case 0x7F: tagName = "Extended Capabilities"; break;
+      case 0xDD: tagName = "Vendor Specific"; break;
+      case 0x4A: tagName = "Neighbor Report"; break;
+      default:   tagName = "Unknown"; break;
+    }
+
+    Serial.printf("  Tag: 0x%02X (%3d) %-25s Len: %2d → ", tagNumber, tagNumber, tagName.c_str(), tagLength);
+
+    // ASCII or hex content
+    bool printable = true;
+    for (int i = 0; i < tagLength; ++i) {
+      if (ieData[pos + 2 + i] < 32 || ieData[pos + 2 + i] > 126) {
+        printable = false;
+        break;
+      }
+    }
+
+    if (printable && tagLength > 0) {
+      Serial.print("ASCII: ");
+      for (int i = 0; i < tagLength; ++i) {
+        Serial.print((char)ieData[pos + 2 + i]);
+      }
+      Serial.println();
+    } else {
+      Serial.print("HEX: ");
+      for (int i = 0; i < tagLength; ++i) {
+        Serial.printf("%02X ", ieData[pos + 2 + i]);
+      }
+      Serial.println();
+    }
+
+    pos += 2 + tagLength;
+  }
+
+  if (pos != ieLen) {
+    Serial.printf("[WARN] Remaining %d bytes at end of IE section\n", ieLen - pos);
+  }
+}
+
+String classifyDestMacPurpose(const uint8_t* mac) {
+  // Broadcast
+  if (mac[0] == 0xFF && mac[1] == 0xFF && mac[2] == 0xFF &&
+      mac[3] == 0xFF && mac[4] == 0xFF && mac[5] == 0xFF)
+    return "Broadcast";
+
+  // IPv6 multicast (33:33:xx:xx:xx:xx)
+  if (mac[0] == 0x33 && mac[1] == 0x33) {
+    if (mac[5] == 0x01)
+      return "IPv6 mDNS (33:33:00:00:00:01)";
+    return "IPv6 Multicast";
+  }
+
+  // IPv4 multicast (01:00:5E:xx:xx:xx)
+  if (mac[0] == 0x01 && mac[1] == 0x00 && mac[2] == 0x5E) {
+    if (mac[3] == 0x00 && mac[4] == 0x00 && mac[5] == 0xFB)
+      return "IPv4 mDNS (224.0.0.251)";
+    if (mac[3] == 0x00 && mac[4] == 0x00 && mac[5] == 0xFC)
+      return "SSDP / UPnP (239.255.255.250)";
+    return "IPv4 Multicast (01:00:5E)";
+  }
+
+  // IEEE Reserved Multicast (Spanning Tree, LLDP, etc.)
+  if (mac[0] == 0x01 && mac[1] == 0x80 && mac[2] == 0xC2 &&
+      mac[3] == 0x00 && mac[4] == 0x00 &&
+      mac[5] >= 0x00 && mac[5] <= 0x0F)
+    return "IEEE Reserved Multicast";
+
+  // Cisco Discovery Protocol (CDP)
+  if (mac[0] == 0x01 && mac[1] == 0x00 && mac[2] == 0x0C &&
+      mac[3] == 0xCC && mac[4] == 0xCC && mac[5] == 0xCC)
+    return "Cisco Discovery Protocol (CDP)";
+
+  // LLDP
+  if (mac[0] == 0x01 && mac[1] == 0x80 && mac[2] == 0xC2 &&
+      mac[3] == 0x00 && mac[4] == 0x00 && mac[5] == 0x0E)
+    return "LLDP (Link Layer Discovery Protocol)";
+
+  // Multicast flag
+  if ((mac[0] & 0x01) != 0)
+    return "Multicast (Unknown or Vendor-Specific)";
+
+  return "Unicast";
+}
+
+//=============================================================
+// Main parsers
+//=============================================================
 void parseGlobalItems(const wifi_promiscuous_pkt_t* ppkt, DeviceCapture& cap) {
   const uint8_t* frame = ppkt->payload;
   uint16_t len = ppkt->rx_ctrl.sig_len;
@@ -74,62 +328,53 @@ void parseGlobalItems(const wifi_promiscuous_pkt_t* ppkt, DeviceCapture& cap) {
     cap.channelMask |= (1 << (ch - 1));
 }
 
-void debugPrintGlobalDebugInfo(const DeviceCapture& cap) {
-  Serial.println(F("🔍 Global Frame Metadata:"));
-  Serial.printf("  • Type/Subtype   : %u / 0x%02X\n", cap.frameType, cap.subtype);
-  Serial.printf("  • Direction      : %s\n", cap.direction.c_str());
-  Serial.printf("  • Length         : %u bytes\n", cap.length);
+void updateMacStatsFromGlobalItems(const DeviceCapture& cap) {
+  MacStats& stats = macStatsMap[cap.senderMac];
 
-  Serial.printf("  • Sender MAC     : %s\n", cap.senderMac.c_str());
-  Serial.printf("  • Dest MAC       : %s\n", cap.receiverMac.c_str());
-  Serial.printf("  • BSSID MAC      : %s\n", cap.bssidMac.c_str());
-
-  Serial.printf("  • Sender Vendor  : %s\n", cap.srcVendor.c_str());
-  Serial.printf("  • Dest Purp/Vend : %s\n", cap.dstMacPurpose.c_str());
-  Serial.printf("  • BSSID Vendor   : %s\n", cap.bssidVendor.c_str());
-
-  Serial.printf("  • RSSI Min/Max   : %d dBm\n", cap.rssi);
-  Serial.printf("  • Time seen      : %s\n", cap.timeSeen);
-  Serial.printf("  • Channels Seen  : %s\n", formatChannelList(cap.channelMask).c_str());
-}
-
-
-String extractAsciiPayloadFromDF(const uint8_t* payload, uint16_t len) {
-  String result = "";
-  String temp = "";
-  for (uint16_t i = 0; i < len; i++) {
-    char c = (char)payload[i];
-    if (isPrintable(c)) {
-      temp += c;
-    } else {
-      if (temp.length() >= 3) {
-        if (!result.isEmpty()) result += "|";
-        result += temp;
-      }
-      temp = "";
-    }
+  // First seen
+  if (stats.packetCount == 0) {
+    stats.firstSeen = cap.timeSeen;
+    stats.vendor = cap.srcVendor;
   }
-  // Add any trailing valid string
-  if (temp.length() >= 3) {
-    if (!result.isEmpty()) result += "|";
-    result += temp;
-  }
-  return result;
-}
 
+  // Last seen always updated
+  stats.lastSeen = cap.timeSeen;
+
+  // Packet count
+  stats.packetCount++;
+
+  // RSSI
+  if (cap.rssi < stats.rssiMin) stats.rssiMin = cap.rssi;
+  if (cap.rssi > stats.rssiMax) stats.rssiMax = cap.rssi;
+
+  // Channel tracking
+  //cap.channelMask |= (1 << (ch - 1));
+  stats.channelsSeen |= cap.channelMask;
+
+  // Frame combo key (e.g. "020C(Cl→AP)")
+  FrameStatKey key = {
+    .type = cap.frameType,
+    .subtype = cap.subtype,
+    .direction = static_cast<uint8_t>(cap.directionCode)
+  };
+  stats.frameCombos[key]++;
+  stats.lenSum += cap.length;
+  stats.lenSqSum += cap.length * cap.length;
+
+  String rxPrefix = cap.receiverMac.substring(0, 8);  // First 3 bytes
+  String rxSummary = rxPrefix + "(" + abbreviateMacPurpose(cap.dstMacPurpose) + ")";
+  stats.rxMacSummaries.insert(rxSummary);
+  String bssidPrefix = cap.bssidMac.substring(0, 8);  // First 3 bytes
+  String bssidSummary = bssidPrefix + "(" + cap.bssidVendor + ")";
+  stats.bssidSummaries.insert(bssidSummary);
+  
+}
 
 void parseDataFrame(const uint8_t* frame, uint16_t len, const DeviceCapture& cap) {
   if (cap.frameType != 2) return;
 
   const String& macKey = cap.senderMac;
   MacStats& stats = macStatsMap[macKey];
-
-  String comboKey = String(cap.frameType, HEX) + String(cap.subtype, HEX) + " " + cap.directionText;
-  stats.otherCombos[comboKey]++;
-  stats.destMacs.insert(cap.receiverMac);
-  stats.totalDataFrames++;
-  stats.lenSum += cap.length;
-  stats.lenSqSum += cap.length * cap.length;
 
   uint8_t macHeaderLen = 24;
   if (cap.directionCode == DIR_WDS) macHeaderLen += 6;
@@ -302,37 +547,126 @@ void parseDataFrame(const uint8_t* frame, uint16_t len, const DeviceCapture& cap
   }
 }
 
+//====================================================
+// Print functions
+//====================================================
+void debugPrintGlobalInfo(const DeviceCapture& cap) {
+  Serial.println(F("🔍 Global Frame Metadata:"));
+  Serial.printf("  • Type/Subtype   : %u / 0x%02X\n", cap.frameType, cap.subtype);
+  Serial.printf("  • Direction      : %s\n", cap.directionText.c_str());
+  Serial.printf("  • Length         : %u bytes\n", cap.length);
 
+  Serial.printf("  • Sender MAC     : %s\n", cap.senderMac.c_str());
+  Serial.printf("  • Dest MAC       : %s\n", cap.receiverMac.c_str());
+  Serial.printf("  • BSSID MAC      : %s\n", cap.bssidMac.c_str());
 
-void updateMacStatsFromGlobalItems(const DeviceCapture& cap, int rssi, uint8_t channel) {
-  MacStats& stats = macStatsMap[cap.senderMac];
+  Serial.printf("  • Sender Vendor  : %s\n", cap.srcVendor.c_str());
+  Serial.printf("  • Dest Purp/Vend : %s\n", cap.dstMacPurpose.c_str());
+  Serial.printf("  • BSSID Vendor   : %s\n", cap.bssidVendor.c_str());
 
-  // First seen
-  if (stats.packetCount == 0) {
-    stats.firstSeen = cap.timeSeen;
-  }
-
-  // Last seen always updated
-  stats.lastSeen = cap.timeSeen;
-
-  // Packet count
-  stats.packetCount++;
-
-  // RSSI
-  if (cap.rssi < stats.rssiMin) stats.rssiMin = cap.rssi;
-  if (cap.rssi > stats.rssiMax) stats.rssiMax = cap.rssi;
-
-  // Channel tracking
-  if (channel >= 1 && channel <= 13) {
-    stats.channelMask |= (1 << (cap.channel - 1));
-  }
-
-  // Frame combo key (e.g. "020C(Cl→AP)")
-  char comboKey[32];
-  snprintf(comboKey, sizeof(comboKey), "%01X%02X(%s)", cap.frameType, cap.subtype, cap.direction.c_str());
-  stats.frameCombos[String(comboKey)]++;
+  Serial.printf("  • RSSI           : %d dBm\n", cap.rssi);
+  Serial.printf("  • Time Seen      : %lu ms since boot\n", cap.timeSeen);
+  Serial.printf("  • Channels Seen  : %s\n", formatChannelList(cap.channelMask).c_str());
 }
 
+void printGlobalMacStats() {
+  Serial.println(F("\n📊 Device Summary After Scan"));
+  Serial.println(F("MAC(ven)      Combos            Pkts   LenAvg/Std   Chs    RSSImin/max  First/Last (s)"));
+  Serial.println(F("---------------------------------------------------------------------------------------------------------"));
+
+  for (const auto& kv : macStatsMap) {
+    const String& mac = kv.first;
+    const MacStats& stats = kv.second;
+
+    // Only show if some data frames were captured
+    if (stats.packetCount == 0) continue;
+
+    // MAC vendor (sender)
+    String macShort = mac.substring(0, 8);  // first 3 bytes
+    String vendor = stats.vendor;
+
+    // Receiver MAC purpose
+    //String rxSummaryStr;
+    //for (const String& entry : stats.rxMacSummaries) {
+    //  if (!rxSummaryStr.isEmpty()) rxSummaryStr += "|";
+    //    rxSummaryStr += entry;
+    //}
+
+    // BSSID+Vendor
+    //String bssidSummaryStr;
+    //for (const String& entry : stats.bssidSummaries) {
+    //  if (!bssidSummaryStr.isEmpty()) bssidSummaryStr += "|";
+    //    bssidSummaryStr += entry;
+    //}
+
+    // Combo list
+    String comboStr;
+    for (const auto& combo : stats.frameCombos) {
+      const FrameStatKey& k = combo.first;
+      uint32_t count = combo.second;
+      char abbrev[16];
+      snprintf(abbrev, sizeof(abbrev), "%u%02X%u%u ", k.type, k.subtype, k.direction, count);
+      comboStr += abbrev;
+    }
+
+    // Length mean/std dev
+    float meanLen = stats.packetCount > 0 ? (float)stats.lenSum / stats.packetCount : 0;
+    float stdDevLen = 0;
+    if (stats.packetCount > 1) {
+      float variance = ((float)stats.lenSqSum / stats.packetCount) - (meanLen * meanLen);
+      stdDevLen = sqrtf(variance);
+    }
+
+    // RSSI
+    int8_t rssiMin = stats.rssiMin;
+    int8_t rssiMax = stats.rssiMax;
+
+    // Time seen
+    uint32_t first = stats.firstSeen / 1000;
+    uint32_t last  = stats.lastSeen  / 1000;
+
+
+    // Print row
+    Serial.printf("%-10s %-20s   %3u  %5.1f/%-5.1f   %s  %3d/%-3d     %5lus/%5lus\n",
+                  (macShort + "(" + vendor + ")").c_str(),
+                  //rxSummaryStr.c_str(),
+                  //bssidSummaryStr.c_str(),
+                  comboStr.c_str(),
+                  stats.packetCount,
+                  meanLen, stdDevLen,
+                  formatChannelList(stats.channelsSeen).c_str(),
+                  rssiMin, rssiMax,
+                  first, last);
+
+    if (!stats.rxMacSummaries.empty()) {
+      Serial.print("    → Rx MACs: ");
+      int count = 0;
+      for (const String& entry : stats.rxMacSummaries) {
+        if (count++ > 0) Serial.print("|");
+        Serial.print(entry);
+      }
+      Serial.println();
+    }
+
+    if (!stats.bssidSummaries.empty()) {
+      Serial.print(" → BSSID MACs: ");
+      int count = 0;
+      for (const String& entry : stats.bssidSummaries) {
+        if (count++ > 0) Serial.print("|");
+        Serial.print(entry);
+      }
+      Serial.println();
+    }
+
+
+
+  } // End for loop
+
+  Serial.println("-----------------------------------------------------------------------------------------------------\n");
+}
+
+
+/*
 void debugPrintMacStats(const String& macKey) {
   if (macStatsMap.find(macKey) == macStatsMap.end()) {
     Serial.printf("[DEBUG] No stats found for MAC: %s\n", macKey.c_str());
@@ -343,7 +677,7 @@ void debugPrintMacStats(const String& macKey) {
   Serial.printf("\n[DEBUG] Stats for MAC: %s\n", macKey.c_str());
 
   // Basic
-  Serial.printf("  Total Data Frames: %lu\n", s.totalDataFrames);
+  Serial.printf("  Total Data Frames: %lu\n", s.packetCount);
   Serial.printf("  Len Sum: %lu | Len^2 Sum: %lu\n", s.lenSum, s.lenSqSum);
 
   // QoS Up
@@ -396,4 +730,24 @@ void debugPrintMacStats(const String& macKey) {
     Serial.println();
   }
 }
+*/
+void printGlobalFrameStats() {
+  Serial.println("\n[GLOBAL FRAME STATS]");
+  for (const auto& kv : globalFrameStats) {
+    const FrameStatKey& key = kv.first;
+    int count = kv.second;
 
+    // Format direction
+    const char* dirSymbol = " ";
+    switch (key.direction) {
+      case 1: dirSymbol = "[→]"; break;
+      case 2: dirSymbol = "[←]"; break;
+      case 3: dirSymbol = "[↔︎]"; break;
+      default: dirSymbol = "[ ]"; break;
+    }
+
+    char combo[10];
+    snprintf(combo, sizeof(combo), "%02X/%02X", key.type, key.subtype);
+    Serial.printf("  • %s %s → %d\n", combo, dirSymbol, count);
+  }
+}
