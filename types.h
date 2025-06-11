@@ -16,6 +16,42 @@ enum FrameDirection : uint8_t {
 const char* directionToStr(FrameDirection dir);
 
 // ---------------- STRUCTS ----------------
+
+struct FrameStatKey {
+  uint8_t type;
+  uint8_t subtype;
+  uint8_t direction;
+
+  bool operator<(const FrameStatKey& other) const {
+    if (type != other.type) return type < other.type;
+    if (subtype != other.subtype) return subtype < other.subtype;
+    return direction < other.direction;
+  }
+};
+
+struct wpsFingerprint {
+  String deviceName;
+  String modelName;
+  String modNumDetail;
+  String serialNumber;
+  String uuid;
+  String primaryDeviceType;
+  String authInfo;
+  String rfBand;
+  uint16_t devicePasswordId = 0;
+  uint16_t configMethods = 0;
+  String vendorExt;
+  String wpsSumFxd = "";  // generated inside parseWpsIE
+  String wpsSumVar = "";  // generated inside parseWpsIE
+  String shortWpsFP;
+};
+
+struct MgmtInfo {
+  String ssid;
+  String asciiHints;  // from unknown ASCII-looking IEs
+  wpsFingerprint wps;
+};
+
 struct DeviceCapture {
   uint8_t frameType;
   uint8_t subtype;
@@ -36,18 +72,9 @@ struct DeviceCapture {
   String directionText = "Unknown";
 
   bool isEncrypted = false;
-};
 
-struct FrameStatKey {
-  uint8_t type;
-  uint8_t subtype;
-  uint8_t direction;
+  MgmtInfo mgmtInfo;
 
-  bool operator<(const FrameStatKey& other) const {
-    if (type != other.type) return type < other.type;
-    if (subtype != other.subtype) return subtype < other.subtype;
-    return direction < other.direction;
-  }
 };
 
 struct MacStats {
@@ -83,6 +110,10 @@ struct MacStats {
   std::set<String> icmpv6Types;
 
   std::set<String> asciiStrings;
+
+  //Mgmt frame parsing
+  //wpsFingerprint wps;
+  MgmtInfo mgmt;
 };
 
 extern std::map<String, MacStats> macStatsMap;
@@ -135,6 +166,7 @@ const VendorOUI vendorTable[] = {
   {{0x00, 0x37, 0x2A}, "WiFiAl"},
   {{0x50, 0x6F, 0x9A}, "WiFiAl"},
   {{0x00, 0x24, 0xE2}, "Hasgwa"},
+  {{0x44, 0x3B, 0x14}, "MitStr"}, //MitraStar Technology Corp.
   {{0xCC, 0xED, 0xDC}, "MitStr"},
   {{0x44, 0x48, 0xB9}, "MitStr"},
   {{0xCC, 0xD4, 0xA1}, "MitStr"},
@@ -173,7 +205,15 @@ const VendorOUI vendorTable[] = {
   {{0x08, 0xAA, 0x55}, "Motrla"},
   {{0x54, 0x27, 0x58}, "Motrla"},
   {{0x00, 0xBD, 0x3E}, "Vizio"},
-  {{0x8C, 0x3B, 0x4A}, "UGSICo"} //Universal Global Scientific Industrial Co., Ltd.
+  {{0x8C, 0x3B, 0x4A}, "UGSICo"}, //Universal Global Scientific Industrial Co., Ltd.
+  {{0x80, 0x78, 0x71}, "Askey"}, //Askey Computer Corp
+  {{0xF4, 0x52, 0x46}, "Askey"}, //Askey Computer Corp
+  {{0xB4, 0x8C, 0x9D}, "Azure"}, //AzureWave Tech Inc.
+  {{0x90, 0xE4, 0x68}, "Guangz"}, //Guangzhou Shiyuan Electronic Technology Company Limited
+  {{0xCC, 0x5E, 0xF8}, "CNeTec"}, //Cloud Network Technology Singapore Pte. Ltd.
+  {{0x30, 0x03, 0xC8}, "CNeTec"}, //Cloud Network Technology Singapore Pte. Ltd.
+  {{0xB4, 0xE6, 0x2A}, "LGInno"}, //LG Innotek
+  {{0xFC, 0x15, 0xB4}, "LGInno"}, //Hewlett Packard
 };
 
 const size_t vendorCount = sizeof(vendorTable) / sizeof(vendorTable[0]);

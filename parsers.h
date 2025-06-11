@@ -5,6 +5,8 @@
 //=============================================
 // Helpers
 //=============================================
+void parseUnknownAsciiIe(uint8_t tagId, const uint8_t* tagData, uint8_t tagLen, String& output);
+String extractSsid(const uint8_t* payload, int len);
 String abbreviateMacPurpose(const String& purpose);
 void initSD();
 String getScanTimestamp();
@@ -15,13 +17,16 @@ String extractAsciiPayloadFromDF(const uint8_t* data, uint16_t len);
 String formatChannelList(uint16_t mask);
 //String hexDump(const uint8_t* data, int len);
 //void parseUnknownAsciiIe(uint8_t tagNumber, const uint8_t* tagData, uint8_t tagLength, String& asciiStorage);
-//void printIEsDebug(const uint8_t* ieData, int ieLen);
+void printIEsDebug(const uint8_t* ieData, int ieLen);
 //=============================================
 // Main parsers
 //=============================================
 void parseGlobalItems(const wifi_promiscuous_pkt_t* ppkt, DeviceCapture& cap);
 void updateMacStatsFromGlobalItems(const DeviceCapture& cap);
 void parseDataFrame(const uint8_t* frame, uint16_t len, const DeviceCapture& cap);
+void parseMgmtIEs(const uint8_t* data, uint16_t len, DeviceCapture& cap);
+void parseMgmtFrame(const uint8_t* frame, uint16_t len, DeviceCapture& cap);
+wpsFingerprint parseWpsIE(const uint8_t* data, int len);
 //=============================================
 // Printers
 //=============================================

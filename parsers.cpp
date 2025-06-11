@@ -22,6 +22,65 @@ const char* directionToStr(FrameDirection dir) {
 //=============================================================
 // Helpers
 //=============================================================
+void parseUnknownAsciiIe(uint8_t tagId, const uint8_t* tagData, uint8_t tagLen, String& output) {
+  // Known tags — ignore these
+  static const uint8_t knownTags[] = {
+    0x00, 0x01, 0x03, 0x05, 0x07, 0x0B, 0x2A, 0x2D, 0x32,
+    0x3D, 0x30, 0xDD, 0x7F, 0x46, 0x23, 0x22, 0x24, 0x36
+  };
+  for (uint8_t i = 0; i < sizeof(knownTags); ++i)
+    if (tagId == knownTags[i]) return;
+
+  if (tagLen < 4) return;
+
+  // Check all chars printable
+  for (int i = 0; i < tagLen; ++i)
+    if (tagData[i] < 32 || tagData[i] > 126) return;
+
+  // Build string
+  String result = "";
+  for (int i = 0; i < tagLen; ++i)
+    result += (char)tagData[i];
+
+  // Skip duplicates or overflow
+  const int MAX_ASCII_TOTAL = 100;
+  if (output.indexOf(result) != -1 || output.length() + result.length() + 1 > MAX_ASCII_TOTAL)
+    return;
+
+  // Append
+  if (output.length()) output += ";";
+  output += result;
+
+  // Print once
+  Serial.printf("  🔍 [ASCII Tag] 0x%02X (%3d): \"%s\"\n", tagId, tagId, result.c_str());
+}
+
+String extractSsid(const uint8_t* payload, int len) {
+  int offset = 0;
+  while (offset + 2 <= len) {
+    uint8_t id = payload[offset];
+    uint8_t tagLen = payload[offset + 1];
+
+    if (offset + 2 + tagLen > len) break;
+
+    if (id == 0 && tagLen <= 32) {  // SSID tag
+      if (tagLen == 0) return "";  // hidden SSID
+
+      String ssid = "";
+      for (int i = 0; i < tagLen; ++i) {
+        char c = payload[offset + 2 + i];
+        if (c >= 32 && c <= 126) ssid += c;
+      }
+
+      return ssid.length() ? ssid : "";
+    }
+
+    offset += 2 + tagLen;
+  }
+
+  return "";
+}
+
 String abbreviateMacPurpose(const String& purpose) {
   if (purpose == "Broadcast") return "BC";
   if (purpose == "IPv6 mDNS (33:33:00:00:00:01)") return "mDNS6";
@@ -112,48 +171,6 @@ String hexDump(const uint8_t* data, int len) {
     out += buf;
   }
   return out;
-}
-
-void parseUnknownAsciiIe(uint8_t tagNumber, const uint8_t* tagData, uint8_t tagLength, String& asciiStorage) {
-  const uint8_t knownTags[] = {
-    0x00, 0x01, 0x03, 0x05, 0x07, 0x0B, 0x2A, 0x2D, 0x32,
-    0x3D, 0x30, 0xDD, 0x7F, 0x46, 0x23, 0x22, 0x24, 0x36
-  };
-
-  for (uint8_t i = 0; i < sizeof(knownTags); ++i)
-    if (tagNumber == knownTags[i]) return;
-
-  if (tagLength < 4) return;
-
-  bool asciiLike = true;
-  for (int i = 0; i < tagLength; ++i) {
-    char c = tagData[i];
-    if (c < 32 || c > 126) {
-      asciiLike = false;
-      break;
-    }
-  }
-
-  if (!asciiLike) return;
-
-  // Construct result
-  String result = "";
-  for (int i = 0; i < tagLength; ++i)
-    result += (char)tagData[i];
-
-  // Skip duplicates
-  if (asciiStorage.indexOf(result) != -1) return;
-
-  // Truncate if too long
-  const int MAX_ASCII_TOTAL_LEN = 100;
-  if (asciiStorage.length() + result.length() + 1 > MAX_ASCII_TOTAL_LEN) return;
-
-  // Store it
-  if (asciiStorage.length()) asciiStorage += ";";
-  asciiStorage += result;
-
-  // 🔥 Only print *once*, when it is new:
-  Serial.printf("  [ASCII Tag] 0x%02X (%-3d): \"%s\"\n", tagNumber, tagNumber, result.c_str());
 }
 
 void printIEsDebug(const uint8_t* ieData, int ieLen) {
@@ -270,6 +287,7 @@ String classifyDestMacPurpose(const uint8_t* mac) {
 //=============================================================
 // Main parsers
 //=============================================================
+//----Global items (common to both data and management frames) parsing--------
 void parseGlobalItems(const wifi_promiscuous_pkt_t* ppkt, DeviceCapture& cap) {
   const uint8_t* frame = ppkt->payload;
   uint16_t len = ppkt->rx_ctrl.sig_len;
@@ -369,6 +387,7 @@ void updateMacStatsFromGlobalItems(const DeviceCapture& cap) {
   stats.bssidSummaries.insert(bssidSummary);
   
 }
+//---Mgmt frame parsing---------------------
 
 void parseDataFrame(const uint8_t* frame, uint16_t len, const DeviceCapture& cap) {
   if (cap.frameType != 2) return;
@@ -546,6 +565,219 @@ void parseDataFrame(const uint8_t* frame, uint16_t len, const DeviceCapture& cap
     if (ascii.length()) stats.asciiStrings.insert(ascii);
   }
 }
+//---Mgmt frame parsing---------------------
+void parseMgmtFrame(const uint8_t* frame, uint16_t len, DeviceCapture& cap) {
+  if (len < 36) return;  // sanity check (24 + 12)
+  const uint8_t* ieData = frame + 36;  // 24 header + 12 fixed mgmt
+  uint16_t ieLen = len - 36;
+
+  // Parse all IEs including WPS
+  parseMgmtIEs(ieData, ieLen, cap);
+}
+
+void parseMgmtIEs(const uint8_t* data, uint16_t len, DeviceCapture& cap) {
+  int offset = 0;
+  while (offset + 2 <= len) {
+    uint8_t id = data[offset];
+    uint8_t tagLen = data[offset + 1];
+    if (offset + 2 + tagLen > len) break;
+
+    const uint8_t* tagData = data + offset + 2;
+
+    if (id == 0 && tagLen <= 32) {
+      String ssid = "";
+      for (int i = 0; i < tagLen; ++i) {
+        char c = tagData[i];
+        if (c >= 32 && c <= 126) ssid += c;
+      }
+      if (ssid.length()) {
+        cap.mgmtInfo.ssid = ssid;
+        Serial.println("📶 [SSID] Extracted: \"" + ssid + "\"");
+      }
+    }
+//    if (id == 0 && tagLen <= 32) {
+//      String ssid = extractSsid(data + offset, len - offset);
+//      if (ssid.length()) cap.mgmtInfo.ssid = ssid;
+//      Serial.println("📶 [SSID] Extracted: \"" + ssid + "\"");
+//    }
+
+    else if (id == 221 && tagLen >= 4 &&
+             tagData[0] == 0x00 && tagData[1] == 0x50 && tagData[2] == 0xF2 && tagData[3] == 0x04) {
+      cap.mgmtInfo.wps = parseWpsIE(tagData + 4, tagLen - 4);
+    }
+
+    // Check unknowns
+    parseUnknownAsciiIe(id, tagData, tagLen, cap.mgmtInfo.asciiHints);
+
+    offset += 2 + tagLen;
+  }
+}
+
+wpsFingerprint parseWpsIE(const uint8_t* data, int len) {
+  wpsFingerprint fp;
+  int offset = 0;
+
+  while (offset + 4 <= len) {
+    uint16_t type = (data[offset] << 8) | data[offset + 1];
+    uint16_t length = (data[offset + 2] << 8) | data[offset + 3];
+    if (offset + 4 + length > len) break;
+
+    const uint8_t* value = data + offset + 4;
+    String strValue = "";
+
+    for (int i = 0; i < length; i++) {
+      char c = value[i];
+      if (c >= 32 && c <= 126) strValue += c;
+    }
+
+    switch (type) {
+      case 0x1011: fp.deviceName = strValue; break;
+      case 0x1012: fp.modelName = strValue; break;
+      case 0x1023: fp.modNumDetail = strValue; break;
+      case 0x1024: fp.serialNumber = strValue; break;
+
+      case 0x1044: // UUID-E
+      case 0x1047: {
+        if (length == 16) {
+          char uuidStr[37];
+          snprintf(uuidStr, sizeof(uuidStr),
+            "%02X%02X%02X%02X-%02X%02X-%02X%02X-%02X%02X-%02X%02X%02X%02X%02X%02X",
+            value[0], value[1], value[2], value[3],
+            value[4], value[5],
+            value[6], value[7],
+            value[8], value[9],
+            value[10], value[11], value[12], value[13], value[14], value[15]);
+          fp.uuid = String(uuidStr);
+        } else if (length == 1 || length == 2) {
+          fp.devicePasswordId = (length == 2) ? (value[0] << 8) | value[1] : value[0];
+        }
+        break;
+      }
+
+      case 0x1054:  // Primary Device Type
+        if (length == 8) {
+          char typeStr[25];
+          snprintf(typeStr, sizeof(typeStr),
+            "%02X:%02X:%02X:%02X:%02X:%02X:%02X:%02X",
+            value[0], value[1], value[2], value[3],
+            value[4], value[5], value[6], value[7]);
+          fp.primaryDeviceType = String(typeStr);
+        }
+        break;
+
+      case 0x103C:  // RF Band
+        if (length == 1) {
+          uint8_t band = value[0];
+          fp.rfBand = (band == 1) ? "2.4GHz" :
+                      (band == 2) ? "5GHz" :
+                      (band == 3) ? "Dual" : "Unknown";
+        }
+        break;
+
+      case 0x1009:  // Device Password ID
+        if (length == 1 || length == 2) {
+          fp.devicePasswordId = (length == 2) ? (value[0] << 8) | value[1] : value[0];
+        }
+        break;
+
+      case 0x1008:  // Config Methods
+        if (length == 2) {
+          fp.configMethods = (value[0] << 8) | value[1];
+        }
+        break;
+
+      case 0x1049:  // Vendor Extension
+        if (length >= 3) {
+          char ouiStr[9];
+          snprintf(ouiStr, sizeof(ouiStr), "%02X:%02X:%02X", value[0], value[1], value[2]);
+          String vendor = lookupVendor(value);
+          fp.vendorExt = String(ouiStr);
+          if (vendor != "Unknwn") fp.vendorExt += " (" + vendor + ")";
+        }
+        break;
+
+      case 0x104A:  // Auth Info
+        if (length > 0) {
+          String hexStr;
+          for (int i = 0; i < length; ++i) {
+            if (i > 0) hexStr += ":";
+            if (value[i] < 0x10) hexStr += "0";
+            hexStr += String(value[i], HEX);
+          }
+          fp.authInfo = "104A=" + hexStr;
+        }
+        break;
+
+      default:
+        break;
+    }
+
+    offset += 4 + length;
+  }
+
+  // Build summary strings
+
+  // 🔐 Fixed Identity Fingerprint
+  String fxd = "";
+  if (fp.uuid.length())              fxd += "uuid=" + fp.uuid + ";";
+  if (fp.modelName.length())         fxd += "model=" + fp.modelName + ";";
+  if (fp.modNumDetail.length())      fxd += "detail=" + fp.modNumDetail + ";";
+  if (fp.serialNumber.length())      fxd += "serial=" + fp.serialNumber + ";";
+  if (fp.deviceName.length())        fxd += "name=" + fp.deviceName + ";";
+  if (fp.primaryDeviceType.length()) fxd += "type=" + fp.primaryDeviceType + ";";
+  if (fp.vendorExt.length())         fxd += "vendor=" + fp.vendorExt + ";";
+
+  // ⚙️ Variable Config Fingerprint
+  String var = "";
+  if (fp.authInfo.length())          var += fp.authInfo + ";";
+  if (fp.rfBand.length())            var += "band=" + fp.rfBand + ";";
+  if (fp.devicePasswordId != 0) {
+    char pwBuf[5];
+    sprintf(pwBuf, "%04X", fp.devicePasswordId);
+    var += "pass=" + String(pwBuf) + ";";
+  }
+  if (fp.configMethods != 0) {
+    char cfgBuf[5];
+    sprintf(cfgBuf, "%04X", fp.configMethods);
+    var += "config=" + String(cfgBuf) + ";";
+  }
+
+  fp.wpsSumFxd = fxd;
+  fp.wpsSumVar = var;
+
+  // Optional short summary
+//  if (fp.deviceName.length() || fp.modelName.length()) {
+//    fp.shortWpsFP = fp.deviceName;
+//    if (fp.modelName.length()) fp.shortWpsFP += " (" + fp.modelName + ")";
+//  }
+
+Serial.println(F("📡 [WPS DEBUG] WPS Information Element Parsed:"));
+
+if (fp.uuid.length())              Serial.println("  UUID             : " + fp.uuid);
+if (fp.deviceName.length())        Serial.println("  Device Name      : " + fp.deviceName);
+if (fp.modelName.length())         Serial.println("  Model Name       : " + fp.modelName);
+if (fp.modNumDetail.length())      Serial.println("  Model Detail     : " + fp.modNumDetail);
+if (fp.serialNumber.length())      Serial.println("  Serial Number    : " + fp.serialNumber);
+if (fp.primaryDeviceType.length()) Serial.println("  Device Type      : " + fp.primaryDeviceType);
+if (fp.vendorExt.length())         Serial.println("  Vendor Extension : " + fp.vendorExt);
+if (fp.rfBand.length())            Serial.println("  RF Band          : " + fp.rfBand);
+if (fp.authInfo.length())          Serial.println("  Auth Info        : " + fp.authInfo);
+
+if (fp.devicePasswordId != 0)
+  Serial.printf("  Device Password  : 0x%04X\n", fp.devicePasswordId);
+
+if (fp.configMethods != 0)
+  Serial.printf("  Config Methods   : 0x%04X\n", fp.configMethods);
+
+if (fp.wpsSumFxd.length())
+  Serial.println("  🧬 WPS Fingerprint Fxd : " + fp.wpsSumFxd);
+
+if (fp.wpsSumVar.length())
+  Serial.println("  ⚙️  WPS Fingerprint Var : " + fp.wpsSumVar);
+
+
+  return fp;
+}
 
 //====================================================
 // Print functions
@@ -655,6 +887,14 @@ void printGlobalMacStats() {
       Serial.println();
     }
 
+if (stats.mgmt.ssid.length())
+  Serial.println("    → SSID: " + stats.mgmt.ssid);
+
+if (stats.mgmt.asciiHints.length())
+  Serial.println("    → ASCII: " + stats.mgmt.asciiHints);
+
+if (stats.mgmt.wps.wpsSumFxd.length())
+  Serial.println("    → WPS Fxd: " + stats.mgmt.wps.wpsSumFxd);
 
   } // End for loop
 

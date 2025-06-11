@@ -33,9 +33,12 @@ void sniffer_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
   //uint16_t len = ppkt->rx_ctrl.sig_len;
   //int8_t rssi = ppkt->rx_ctrl.rssi;
   //uint8_t channel = ppkt->rx_ctrl.channel;
+  //auto *ppkt = (wifi_promiscuous_pkt_t *)buf;
+  //const wifi_ieee80211_hdr* hdr = (const wifi_ieee80211_hdr*)ppkt->payload;
+  //const uint8_t *payload = ppkt->payload;
   DeviceCapture cap;
   parseGlobalItems(ppkt, cap);
-  debugPrintGlobalInfo(cap); // [DEBUG] See if parseGlobalItems() successfully captured everything it's supposed to
+  //debugPrintGlobalInfo(cap); // [DEBUG] See if parseGlobalItems() successfully captured everything it's supposed to
   //Serial.printf("[DEBUG] type: %02X, subtype: %02X, dir: %d\n", fType, subtype, direction);
   updateMacStatsFromGlobalItems(cap);
   //----------------------------------------------------------------
@@ -51,31 +54,55 @@ void sniffer_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
   globalFrameStats[key]++;
   //----------------------------------------------------------------
   // Look only at frames of interest
-  bool isMgmtFrame = (cap.frameType == 0x00 && (cap.subtype == 0x00 || cap.subtype == 0x02 || cap.subtype == 0x04 ||
-                         cap.subtype == 0x0B || 
-                         (cap.subtype == 0x0C && dirCode == 0) || 
-                         (cap.subtype == 0x0A && dirCode == 0)));
+  bool isMgmtFrame = (cap.frameType == 0x00 &&
+    (cap.subtype == 0x00 ||  // Association Request
+    cap.subtype == 0x02 ||  // Reassociation Request
+    cap.subtype == 0x04 ||  // Probe Request
+    cap.subtype == 0x0B ||  // Authentication
+    cap.subtype == 0x08 ||  // Beacon
+    (cap.subtype == 0x0C && cap.directionCode == DIR_CLIENT_TO_AP) ||  // Deauthentication
+    (cap.subtype == 0x0A && cap.directionCode == DIR_CLIENT_TO_AP)));  // Disassociation
   bool isDataFrame = (cap.frameType == 0x02);
   if (!isMgmtFrame && !isDataFrame) return;
   //----------------------------------------------------------------
   // Type 2 frames (QoS and non-QoS data frames)
   if(isDataFrame){ 
-    // [DEBUG]--------------
-    //if(cap.subtype == 0x0c || cap.subtype == 0x0d || cap.subtype == 0x08 || cap.subtype == 0x09){
-      //Serial.println("\n=== Data Frame Raw Frame Hex Dump ===");
-      //hexDump(frame, ppkt->rx_ctrl.sig_len)
-      //Serial.printf("[DEBUG] Frame Ctrl: 0x%04X | Type: %u | Subtype: 0x%02X\n", fctl, type, subtype);
-      //parseDataFrame(frame, ppkt->rx_ctrl.sig_len);
-    //}
-    //----------------------
     parseDataFrame(ppkt->payload, ppkt->rx_ctrl.sig_len, cap);
     //debugPrintMacStats(cap.srcMac);
   }
   //-------------------------------------------------------------
   //Type 0 frames (management frames)
   if(isMgmtFrame){
+     // [DEBUG]--------------
+    //if(cap.subtype == 0x0c || cap.subtype == 0x0d || cap.subtype == 0x08 || cap.subtype == 0x09){
+    Serial.println("\n=== Data Frame Raw Frame Hex Dump ===");
+    Serial.printf("[FRAME] type: %02X, subtype: %02X, dir: %s\n", cap.frameType, cap.subtype, cap.directionText);
+    Serial.println("Sender MAC: " + cap.senderMac);
+    int offset = (cap.subtype == 0x04) ? 24 : 36; //Mngmnt frame probe request (0x04->24) or association request (0x00->36)
+    int ieLen = ppkt->rx_ctrl.sig_len - offset;
+    const uint8_t* ieData = ppkt->payload + offset;
+    printIEsDebug(ieData, ieLen);
+      //hexDump(frame, ppkt->rx_ctrl.sig_len)
+      //Serial.printf("[DEBUG] Frame Ctrl: 0x%04X | Type: %u | Subtype: 0x%02X\n", fctl, type, subtype);
+      //parseDataFrame(frame, ppkt->rx_ctrl.sig_len);
+    //}
+    //----------------------
+    // Parse Information Elements
+    parseMgmtFrame(ppkt->payload, ppkt->rx_ctrl.sig_len, cap);
+    // Merge extracted mgmtInfo into per-MAC stats
+    MacStats& stats = macStatsMap[cap.senderMac];
 
-  //...
+    if (cap.mgmtInfo.ssid.length()) {
+      stats.mgmt.ssid = cap.mgmtInfo.ssid;
+    }
+
+    if (cap.mgmtInfo.wps.wpsSumFxd.length()) {
+     stats.mgmt.wps = cap.mgmtInfo.wps;
+    }
+
+    if (cap.mgmtInfo.asciiHints.length()) {
+      stats.mgmt.asciiHints = cap.mgmtInfo.asciiHints;
+    } 
   }
 
 }
