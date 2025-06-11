@@ -74,7 +74,7 @@ void sniffer_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
   //Type 0 frames (management frames)
   if(isMgmtFrame){
      // [DEBUG]--------------
-    //if(cap.subtype == 0x0c || cap.subtype == 0x0d || cap.subtype == 0x08 || cap.subtype == 0x09){
+    if(cap.subtype == 0x04){
     Serial.println("\n=== Data Frame Raw Frame Hex Dump ===");
     Serial.printf("[FRAME] type: %02X, subtype: %02X, dir: %s\n", cap.frameType, cap.subtype, cap.directionText);
     Serial.println("Sender MAC: " + cap.senderMac);
@@ -82,10 +82,10 @@ void sniffer_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
     int ieLen = ppkt->rx_ctrl.sig_len - offset;
     const uint8_t* ieData = ppkt->payload + offset;
     printIEsDebug(ieData, ieLen);
-      //hexDump(frame, ppkt->rx_ctrl.sig_len)
+    hexDump(ppkt->payload, ppkt->rx_ctrl.sig_len)
       //Serial.printf("[DEBUG] Frame Ctrl: 0x%04X | Type: %u | Subtype: 0x%02X\n", fctl, type, subtype);
       //parseDataFrame(frame, ppkt->rx_ctrl.sig_len);
-    //}
+    }
     //----------------------
     // Parse Information Elements
     parseMgmtFrame(ppkt->payload, ppkt->rx_ctrl.sig_len, cap);

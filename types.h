@@ -214,6 +214,7 @@ const VendorOUI vendorTable[] = {
   {{0x30, 0x03, 0xC8}, "CNeTec"}, //Cloud Network Technology Singapore Pte. Ltd.
   {{0xB4, 0xE6, 0x2A}, "LGInno"}, //LG Innotek
   {{0xFC, 0x15, 0xB4}, "LGInno"}, //Hewlett Packard
+  //E4:7D:EB Shanghai Notion Information Technology CO.,LTD.
 };
 
 const size_t vendorCount = sizeof(vendorTable) / sizeof(vendorTable[0]);
