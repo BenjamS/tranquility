@@ -162,16 +162,28 @@ String extractAsciiPayloadFromDF(const uint8_t* payload, uint16_t len) {
   return result;
 }
 
-String hexDump(const uint8_t* data, int len) {
-  char buf[4];  // enough for 2-digit hex + null + separator
-  String out = "";
+void hexDump(const uint8_t* data, int len) {
+  Serial.println("[DEBUG] Full packet hex dump:");
   for (int i = 0; i < len; ++i) {
-    if (i > 0) out += ":";
-    sprintf(buf, "%02X", data[i]);
-    out += buf;
+    if (i % 16 == 0) {
+      if (i != 0) Serial.println();         // New line after 16 bytes
+      Serial.printf("%04X: ", i);           // Offset
+    }
+    Serial.printf("%02X ", data[i]);        // Hex byte
   }
-  return out;
+  Serial.println();
 }
+
+//String hexDump(const uint8_t* data, int len) {
+//  char buf[4];  // enough for 2-digit hex + null + separator
+//  String out = "";
+//  for (int i = 0; i < len; ++i) {
+//    if (i > 0) out += ":";
+//    sprintf(buf, "%02X", data[i]);
+//    out += buf;
+//  }
+//  return out;
+//}
 
 void printIEsDebug(const uint8_t* ieData, int ieLen) {
   Serial.println("[DEBUG] Scanning Information Elements:");
@@ -567,9 +579,41 @@ void parseDataFrame(const uint8_t* frame, uint16_t len, const DeviceCapture& cap
 }
 //---Mgmt frame parsing---------------------
 void parseMgmtFrame(const uint8_t* frame, uint16_t len, DeviceCapture& cap) {
-  if (len < 36) return;  // sanity check (24 + 12)
-  const uint8_t* ieData = frame + 36;  // 24 header + 12 fixed mgmt
-  uint16_t ieLen = len - 36;
+  if (len < 24) return;  // sanity check
+
+  uint8_t subtype = (frame[0] >> 4) & 0x0F;  // subtype is bits 4–7 of byte 0
+  uint16_t offset;
+
+switch (subtype) {
+  case 0x00:  // Association Request
+    if (len < 28) return;
+    offset = 28;
+    break;
+
+  case 0x01:  // Association Response
+    if (len < 30) return;
+    offset = 30;
+    break;
+
+  case 0x04:  // Probe Request
+    if (len < 28) return;
+    offset = 28;
+    break;
+
+  case 0x05:  // Probe Response
+  case 0x08:  // Beacon
+    if (len < 36) return;
+    offset = 36;
+    break;
+
+  default:
+    return;  // unsupported subtype
+}
+
+const uint8_t* ieData = frame + offset;
+uint16_t ieLen = len - offset;
+//  const uint8_t* ieData = frame + 36;  // 24 header + 12 fixed mgmt
+//  uint16_t ieLen = len - 36;
 
   // Parse all IEs including WPS
   parseMgmtIEs(ieData, ieLen, cap);

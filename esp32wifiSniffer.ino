@@ -78,11 +78,23 @@ void sniffer_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
     Serial.println("\n=== Data Frame Raw Frame Hex Dump ===");
     Serial.printf("[FRAME] type: %02X, subtype: %02X, dir: %s\n", cap.frameType, cap.subtype, cap.directionText);
     Serial.println("Sender MAC: " + cap.senderMac);
-    int offset = (cap.subtype == 0x04) ? 24 : 36; //Mngmnt frame probe request (0x04->24) or association request (0x00->36)
+    //int offset = (cap.subtype == 0x04) ? 24 : 36; //Mngmnt frame probe request (0x04->24) or association request (0x00->36)
+    int offset;
+switch (cap.subtype) {
+  case 0x04: offset = 28; break; // Probe Request
+  case 0x00: // Assoc Req
+  case 0x01: // Assoc Resp
+  case 0x05: // Probe Resp
+  case 0x08: // Beacon
+    offset = 36; break;
+  default:
+    Serial.printf("[WARN] Unhandled management subtype: 0x%02X\n", cap.subtype);
+    return;
+}
     int ieLen = ppkt->rx_ctrl.sig_len - offset;
     const uint8_t* ieData = ppkt->payload + offset;
     printIEsDebug(ieData, ieLen);
-    hexDump(ppkt->payload, ppkt->rx_ctrl.sig_len)
+    hexDump(ppkt->payload, ppkt->rx_ctrl.sig_len);
       //Serial.printf("[DEBUG] Frame Ctrl: 0x%04X | Type: %u | Subtype: 0x%02X\n", fctl, type, subtype);
       //parseDataFrame(frame, ppkt->rx_ctrl.sig_len);
     }

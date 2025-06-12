@@ -16,7 +16,7 @@ String lookupVendor(const uint8_t* mac);
 String classifyDestMacPurpose(const uint8_t* mac);
 String extractAsciiPayloadFromDF(const uint8_t* data, uint16_t len);
 String formatChannelList(uint16_t mask);
-String hexDump(const uint8_t* data, int len);
+void hexDump(const uint8_t* data, int len);
 void printIEsDebug(const uint8_t* ieData, int ieLen);
 //=============================================
 // Main parsers
