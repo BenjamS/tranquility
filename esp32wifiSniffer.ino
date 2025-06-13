@@ -37,7 +37,7 @@ void sniffer_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
   bool toDS = fctl & (1 << 8);
   bool fromDS = fctl & (1 << 9);
     // Set enum and string version of direction
-  dirCode = DIR_UNKNOWN;
+  uint8_t dirCode = (uint8_t)DIR_UNKNOWN;
   if (toDS && !fromDS) {
     dirCode = DIR_CLIENT_TO_AP;
   } else if (!toDS && fromDS) {
@@ -56,7 +56,7 @@ void sniffer_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
   FrameStatKey key = {
    .type = frameType,
    .subtype = subtype,
-   .direction = String(directionToStr(dirCode))
+   .direction = dirCode
   };
   globalFrameStats[key]++;
   //----------------------------------------------------------------

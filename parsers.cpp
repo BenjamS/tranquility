@@ -644,6 +644,7 @@ uint16_t ieLen = len - offset;
 
 void parseMgmtIEs(const uint8_t* data, uint16_t len, DeviceCapture& cap) {
   int offset = 0;
+  bool foundSsid = false;
   while (offset + 2 <= len) {
     uint8_t id = data[offset];
     uint8_t tagLen = data[offset + 1];
@@ -657,21 +658,14 @@ void parseMgmtIEs(const uint8_t* data, uint16_t len, DeviceCapture& cap) {
         char c = tagData[i];
         if (c >= 32 && c <= 126) ssid += c;
       }
-    if (ssid.length() && cap.mgmtInfo.ssid.length() == 0) {
-      cap.mgmtInfo.ssid = ssid;
-      Serial.println("📶 [SSID] Extracted: \"" + ssid + "\"");
-
-      // Update stats for this sender MAC
-      auto it = macStatsMap.find(cap.senderMac);
-      if (it != macStatsMap.end()) {
-        addSsidToStats(it->second, ssid);
-      } else {
-        // Optional: create entry if missing
-        MacStats newStats;
-        addSsidToStats(newStats, ssid);
-        macStatsMap[cap.senderMac] = newStats;
+      // Only store the first non-empty SSID
+      if (!foundSsid && ssid.length()) {
+        cap.mgmtInfo.ssid = ssid;
+        Serial.println("📶 [SSID] Extracted: \"" + ssid + "\"");
+        MacStats& stats = macStatsMap[cap.senderMac];
+        addSsidToStats(stats, ssid);
+        foundSsid = true;  // lock in first valid SSID
       }
-    }
 
     }
 //    if (id == 0 && tagLen <= 32) {
@@ -1057,6 +1051,25 @@ void debugPrintMacStats(const String& macKey) {
   }
 }
 */
+
+void printGlobalFrameStats() {
+  Serial.println(F("\n📊 [GLOBAL FRAME STATS]"));
+  for (const auto& kv : globalFrameStats) {
+    const FrameStatKey& key = kv.first;
+    int count = kv.second;
+
+    // Convert direction to label using your existing helper
+    const char* dirLabel = directionToStr((FrameDirection)key.direction);
+
+    // Format frame type/subtype (e.g., "00/04")
+    char combo[10];
+    snprintf(combo, sizeof(combo), "%02X/%02X", key.type, key.subtype);
+
+    Serial.printf("  • %s  %s  → %d\n", combo, dirLabel, count);
+  }
+}
+
+/*
 void printGlobalFrameStats() {
   Serial.println("\n[GLOBAL FRAME STATS]");
   for (const auto& kv : globalFrameStats) {
@@ -1077,3 +1090,4 @@ void printGlobalFrameStats() {
     Serial.printf("  • %s %s → %d\n", combo, dirSymbol, count);
   }
 }
+*/
