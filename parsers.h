@@ -5,6 +5,8 @@
 //=============================================
 // Helpers
 //=============================================
+const char* directionToStr(FrameDirection dir);
+void addSsidToStats(MacStats& stats, const String& ssid);
 void parseUnknownAsciiIe(uint8_t tagId, const uint8_t* tagData, uint8_t tagLen, String& output);
 //void parseUnknownAsciiIe(uint8_t tagNumber, const uint8_t* tagData, uint8_t tagLength, String& asciiStorage);
 String extractSsid(const uint8_t* payload, int len);
@@ -16,8 +18,6 @@ String lookupVendor(const uint8_t* mac);
 String classifyDestMacPurpose(const uint8_t* mac);
 String extractAsciiPayloadFromDF(const uint8_t* data, uint16_t len);
 String formatChannelList(uint16_t mask);
-void hexDump(const uint8_t* data, int len);
-void printIEsDebug(const uint8_t* ieData, int ieLen);
 //=============================================
 // Main parsers
 //=============================================
@@ -33,3 +33,5 @@ wpsFingerprint parseWpsIE(const uint8_t* data, int len);
 void debugPrintGlobalInfo(const DeviceCapture& cap);
 void printGlobalMacStats();
 void printGlobalFrameStats();
+void printIEsDebug(const uint8_t* ieData, int ieLen);
+void hexDump(const uint8_t* data, int len);

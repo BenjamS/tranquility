@@ -9,6 +9,9 @@
 std::map<String, MacStats> macStatsMap;
 std::map<FrameStatKey, int> globalFrameStats;
 
+//=============================================================
+// Helpers
+//=============================================================
 const char* directionToStr(FrameDirection dir) {
   switch (dir) {
     case DIR_CLIENT_TO_AP: return "Cl→AP";
@@ -19,9 +22,14 @@ const char* directionToStr(FrameDirection dir) {
   }
 }
 
-//=============================================================
-// Helpers
-//=============================================================
+void addSsidToStats(MacStats& stats, const String& ssid) {
+  if (ssid.length() == 0) return;
+
+  if (stats.mgmt.seenSsids.insert(ssid).second) {
+    Serial.println("[📡] New SSID discovered for MAC: \"" + ssid + "\"");
+  }
+}
+
 void parseUnknownAsciiIe(uint8_t tagId, const uint8_t* tagData, uint8_t tagLen, String& output) {
   // Known tags — ignore these
   static const uint8_t knownTags[] = {
@@ -595,10 +603,24 @@ switch (subtype) {
     offset = 30;
     break;
 
-  case 0x04:  // Probe Request
-    if (len < 28) return;
-    offset = 28;
+//  case 0x04:  // Probe Request
+//    if (len < 24) return;
+//    offset = 24;
+//    break;
+  case 0x04: {  // Probe Request
+    // Start from base MAC header (24 bytes)
+    offset = 24;
+    // Scan forward for the first valid tag
+    while (offset + 2 < len) {
+      uint8_t tag = frame[offset];
+      uint8_t len = frame[offset + 1];
+      if ((tag <= 0x7F || tag == 0xDD) && (offset + 2 + len <= len)) {
+        break;  // Found valid tag-length pair
+      }
+      offset++;
+    }
     break;
+  }
 
   case 0x05:  // Probe Response
   case 0x08:  // Beacon
@@ -616,6 +638,7 @@ uint16_t ieLen = len - offset;
 //  uint16_t ieLen = len - 36;
 
   // Parse all IEs including WPS
+  cap.mgmtInfo = MgmtInfo();  // clears ssid, wps, asciiHints, etc.
   parseMgmtIEs(ieData, ieLen, cap);
 }
 
@@ -634,10 +657,22 @@ void parseMgmtIEs(const uint8_t* data, uint16_t len, DeviceCapture& cap) {
         char c = tagData[i];
         if (c >= 32 && c <= 126) ssid += c;
       }
-      if (ssid.length()) {
-        cap.mgmtInfo.ssid = ssid;
-        Serial.println("📶 [SSID] Extracted: \"" + ssid + "\"");
+    if (ssid.length() && cap.mgmtInfo.ssid.length() == 0) {
+      cap.mgmtInfo.ssid = ssid;
+      Serial.println("📶 [SSID] Extracted: \"" + ssid + "\"");
+
+      // Update stats for this sender MAC
+      auto it = macStatsMap.find(cap.senderMac);
+      if (it != macStatsMap.end()) {
+        addSsidToStats(it->second, ssid);
+      } else {
+        // Optional: create entry if missing
+        MacStats newStats;
+        addSsidToStats(newStats, ssid);
+        macStatsMap[cap.senderMac] = newStats;
       }
+    }
+
     }
 //    if (id == 0 && tagLen <= 32) {
 //      String ssid = extractSsid(data + offset, len - offset);
@@ -931,8 +966,15 @@ void printGlobalMacStats() {
       Serial.println();
     }
 
-if (stats.mgmt.ssid.length())
-  Serial.println("    → SSID: " + stats.mgmt.ssid);
+if (!stats.mgmt.seenSsids.empty()){
+  Serial.print(" → SSIDs seen: ");
+  int count = 0;
+      for (const String& entry : stats.mgmt.seenSsids) {
+        if (count++ > 0) Serial.print("|");
+        Serial.print(entry);
+      }
+      Serial.println();
+}
 
 if (stats.mgmt.asciiHints.length())
   Serial.println("    → ASCII: " + stats.mgmt.asciiHints);

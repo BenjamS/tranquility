@@ -49,7 +49,9 @@ struct wpsFingerprint {
 struct MgmtInfo {
   String ssid;
   String asciiHints;  // from unknown ASCII-looking IEs
+  std::set<String> seenSsids;
   wpsFingerprint wps;
+  
 };
 
 struct DeviceCapture {
@@ -110,7 +112,7 @@ struct MacStats {
   std::set<String> icmpv6Types;
 
   std::set<String> asciiStrings;
-
+  
   //Mgmt frame parsing
   //wpsFingerprint wps;
   MgmtInfo mgmt;

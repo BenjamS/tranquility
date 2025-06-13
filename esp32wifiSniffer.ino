@@ -28,43 +28,57 @@ int           channelIndex    = 0;
 void sniffer_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
   if (!scanning) return;
   const wifi_promiscuous_pkt_t* ppkt = (const wifi_promiscuous_pkt_t*)buf;
-  //auto *ppkt = (wifi_promiscuous_pkt_t *)buf;
-  //const uint8_t* frame = ppkt->payload;
-  //uint16_t len = ppkt->rx_ctrl.sig_len;
+  uint16_t len = ppkt->rx_ctrl.sig_len;
+  if (len < 24) return;
+  const uint8_t* frame = ppkt->payload;
+  uint16_t fctl = *(const uint16_t*)frame;
+  uint8_t frameType = (fctl >> 2) & 0x03;
+  uint8_t subtype = (fctl >> 4) & 0x0F;
+  bool toDS = fctl & (1 << 8);
+  bool fromDS = fctl & (1 << 9);
+    // Set enum and string version of direction
+  dirCode = DIR_UNKNOWN;
+  if (toDS && !fromDS) {
+    dirCode = DIR_CLIENT_TO_AP;
+  } else if (!toDS && fromDS) {
+    dirCode = DIR_AP_TO_CLIENT;
+  } else if (!toDS && !fromDS) {
+    dirCode = DIR_STA_STA;
+  } else if (toDS && fromDS) {
+    dirCode = DIR_WDS;
+  }
   //int8_t rssi = ppkt->rx_ctrl.rssi;
-  //uint8_t channel = ppkt->rx_ctrl.channel;
-  //auto *ppkt = (wifi_promiscuous_pkt_t *)buf;
-  //const wifi_ieee80211_hdr* hdr = (const wifi_ieee80211_hdr*)ppkt->payload;
-  //const uint8_t *payload = ppkt->payload;
-  DeviceCapture cap;
-  parseGlobalItems(ppkt, cap);
-  //debugPrintGlobalInfo(cap); // [DEBUG] See if parseGlobalItems() successfully captured everything it's supposed to
-  //Serial.printf("[DEBUG] type: %02X, subtype: %02X, dir: %d\n", fType, subtype, direction);
-  updateMacStatsFromGlobalItems(cap);
+  //uint8_t ch = ppkt->rx_ctrl.channel;
   //----------------------------------------------------------------
   //Keeping track of all unique frame type/subtype/direction combos encountered during scan
   // Map direction string to numeric code
-  uint8_t dirCode = (uint8_t)cap.directionCode;
   // STA↔STA and unknown remain 0
   FrameStatKey key = {
-   .type = cap.frameType,
-   .subtype = cap.subtype,
-   .direction = dirCode
+   .type = frameType,
+   .subtype = subtype,
+   .direction = String(directionToStr(dirCode))
   };
   globalFrameStats[key]++;
   //----------------------------------------------------------------
   // Look only at frames of interest
-  bool isMgmtFrame = (cap.frameType == 0x00 &&
-    (cap.subtype == 0x00 ||  // Association Request
-    cap.subtype == 0x02 ||  // Reassociation Request
-    cap.subtype == 0x04 ||  // Probe Request
-    cap.subtype == 0x0B ||  // Authentication
-    cap.subtype == 0x08 ||  // Beacon
-    (cap.subtype == 0x0C && cap.directionCode == DIR_CLIENT_TO_AP) ||  // Deauthentication
-    (cap.subtype == 0x0A && cap.directionCode == DIR_CLIENT_TO_AP)));  // Disassociation
-  bool isDataFrame = (cap.frameType == 0x02);
+  bool isMgmtFrame = (frameType == 0x00 &&
+    (subtype == 0x00 ||  // Association Request
+    subtype == 0x02 ||  // Reassociation Request
+    subtype == 0x04 ||  // Probe Request
+    subtype == 0x0B ||  // Authentication
+    //cap.subtype == 0x08 ||  // Beacon
+    (subtype == 0x0C && dirCode == DIR_CLIENT_TO_AP) ||  // Deauthentication
+    (subtype == 0x0A && dirCode == DIR_CLIENT_TO_AP)));  // Disassociation
+  bool isDataFrame = (frameType == 0x02);
   if (!isMgmtFrame && !isDataFrame) return;
   //----------------------------------------------------------------
+  DeviceCapture cap; //Initialize capture
+  //----------------------------------------------------------------
+  // Parse global items
+  parseGlobalItems(ppkt, cap);
+  //debugPrintGlobalInfo(cap); // [DEBUG] See if parseGlobalItems() successfully captured everything it's supposed to
+  //Serial.printf("[DEBUG] type: %02X, subtype: %02X, dir: %d\n", fType, subtype, direction);
+  updateMacStatsFromGlobalItems(cap);
   // Type 2 frames (QoS and non-QoS data frames)
   if(isDataFrame){ 
     parseDataFrame(ppkt->payload, ppkt->rx_ctrl.sig_len, cap);
@@ -79,20 +93,53 @@ void sniffer_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
     Serial.printf("[FRAME] type: %02X, subtype: %02X, dir: %s\n", cap.frameType, cap.subtype, cap.directionText);
     Serial.println("Sender MAC: " + cap.senderMac);
     //int offset = (cap.subtype == 0x04) ? 24 : 36; //Mngmnt frame probe request (0x04->24) or association request (0x00->36)
-    int offset;
+
+    uint16_t offset;
+
 switch (cap.subtype) {
-  case 0x04: offset = 28; break; // Probe Request
-  case 0x00: // Assoc Req
-  case 0x01: // Assoc Resp
-  case 0x05: // Probe Resp
-  case 0x08: // Beacon
-    offset = 36; break;
+  case 0x04: {  // Probe Request
+    // Start from base MAC header (24 bytes)
+    offset = 24;
+
+    // Scan forward for the first valid tag
+    while (offset + 2 < ppkt->rx_ctrl.sig_len) {
+      uint8_t tag = ppkt->payload[offset];
+      uint8_t len = ppkt->payload[offset + 1];
+      if ((tag <= 0x7F || tag == 0xDD) && (offset + 2 + len <= ppkt->rx_ctrl.sig_len)) {
+        break;  // Found valid tag-length pair
+      }
+      offset++;
+    }
+    break;
+  }
+
+  case 0x00:  // Association Request
+  case 0x01:  // Association Response
+  case 0x05:  // Probe Response
+  case 0x08:  // Beacon
+    offset = 36;  // MAC header (24) + fixed fields (12)
+    break;
+
   default:
     Serial.printf("[WARN] Unhandled management subtype: 0x%02X\n", cap.subtype);
     return;
 }
+
+//    int offset;
+//switch (cap.subtype) {
+//  case 0x04: offset = 24; break; // Probe Request
+//  case 0x00: // Assoc Req
+//  case 0x01: // Assoc Resp
+//  case 0x05: // Probe Resp
+//  case 0x08: // Beacon
+//    offset = 36; break;
+//  default:
+//    Serial.printf("[WARN] Unhandled management subtype: 0x%02X\n", cap.subtype);
+//    return;
+//}
     int ieLen = ppkt->rx_ctrl.sig_len - offset;
     const uint8_t* ieData = ppkt->payload + offset;
+    Serial.printf("[DEBUG] sig_len=%d, offset=%d, ieLen=%d\n", ppkt->rx_ctrl.sig_len, offset, ieLen);
     printIEsDebug(ieData, ieLen);
     hexDump(ppkt->payload, ppkt->rx_ctrl.sig_len);
       //Serial.printf("[DEBUG] Frame Ctrl: 0x%04X | Type: %u | Subtype: 0x%02X\n", fctl, type, subtype);
@@ -193,7 +240,7 @@ void loop() {
     // reset for next cycle
     //nextUdfId = 1;
     Serial.printf("[DEBUG] Free heap before clearing captures: %lu\n", ESP.getFreeHeap());
-    //captures.clear();
+    macStatsMap.clear();
     globalFrameStats.clear();
     Serial.printf("[DEBUG] Free heap after clearing captures: %lu\n", ESP.getFreeHeap());
     scanning = true;
