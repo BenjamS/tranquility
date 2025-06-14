@@ -87,67 +87,54 @@ void sniffer_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
   //-------------------------------------------------------------
   //Type 0 frames (management frames)
   if(isMgmtFrame){
-     // [DEBUG]--------------
+    // Set parsing offset according to subtype
+    uint16_t offset;
+    switch (cap.subtype) {
+    case 0x04: {  // Probe Request
+      // Start from base MAC header (24 bytes)
+      offset = 24;
+      // Scan forward for the first valid tag
+      while (offset + 2 < ppkt->rx_ctrl.sig_len) {
+        uint8_t tag = ppkt->payload[offset];
+        uint8_t len = ppkt->payload[offset + 1];
+        if ((tag <= 0x7F || tag == 0xDD) && (offset + 2 + len <= ppkt->rx_ctrl.sig_len)) {
+          break;  // Found valid tag-length pair
+        }
+        offset++;
+      }
+      break;
+    }
+    case 0x00:  // Association Request
+    case 0x01:  // Association Response
+    case 0x05:  // Probe Response
+    case 0x08:  // Beacon
+    offset = 36;  // MAC header (24) + fixed fields (12)
+    break;
+    default:
+    Serial.printf("[WARN] Unhandled management subtype: 0x%02X\n", cap.subtype);
+    return;
+    }
+    int ieLen = ppkt->rx_ctrl.sig_len - offset;
+    const uint8_t* ieData = ppkt->payload + offset;
+    // [DEBUG]--------------
     if(cap.subtype == 0x04){
     Serial.println("\n=== Data Frame Raw Frame Hex Dump ===");
     Serial.printf("[FRAME] type: %02X, subtype: %02X, dir: %s\n", cap.frameType, cap.subtype, cap.directionText);
     Serial.println("Sender MAC: " + cap.senderMac);
-    //int offset = (cap.subtype == 0x04) ? 24 : 36; //Mngmnt frame probe request (0x04->24) or association request (0x00->36)
-
-    uint16_t offset;
-
-switch (cap.subtype) {
-  case 0x04: {  // Probe Request
-    // Start from base MAC header (24 bytes)
-    offset = 24;
-
-    // Scan forward for the first valid tag
-    while (offset + 2 < ppkt->rx_ctrl.sig_len) {
-      uint8_t tag = ppkt->payload[offset];
-      uint8_t len = ppkt->payload[offset + 1];
-      if ((tag <= 0x7F || tag == 0xDD) && (offset + 2 + len <= ppkt->rx_ctrl.sig_len)) {
-        break;  // Found valid tag-length pair
-      }
-      offset++;
-    }
-    break;
-  }
-
-  case 0x00:  // Association Request
-  case 0x01:  // Association Response
-  case 0x05:  // Probe Response
-  case 0x08:  // Beacon
-    offset = 36;  // MAC header (24) + fixed fields (12)
-    break;
-
-  default:
-    Serial.printf("[WARN] Unhandled management subtype: 0x%02X\n", cap.subtype);
-    return;
-}
-
-//    int offset;
-//switch (cap.subtype) {
-//  case 0x04: offset = 24; break; // Probe Request
-//  case 0x00: // Assoc Req
-//  case 0x01: // Assoc Resp
-//  case 0x05: // Probe Resp
-//  case 0x08: // Beacon
-//    offset = 36; break;
-//  default:
-//    Serial.printf("[WARN] Unhandled management subtype: 0x%02X\n", cap.subtype);
-//    return;
-//}
-    int ieLen = ppkt->rx_ctrl.sig_len - offset;
-    const uint8_t* ieData = ppkt->payload + offset;
     Serial.printf("[DEBUG] sig_len=%d, offset=%d, ieLen=%d\n", ppkt->rx_ctrl.sig_len, offset, ieLen);
     printIEsDebug(ieData, ieLen);
     hexDump(ppkt->payload, ppkt->rx_ctrl.sig_len);
+    String ssid = extractSsid(ieData, ieLen);
+    if (ssid.length()) {
+      cap.mgmtInfo.ssid = ssid;
+      Serial.println("📶 [SSID] Extracted (extractSsid): \"" + ssid + "\"");
+    }
       //Serial.printf("[DEBUG] Frame Ctrl: 0x%04X | Type: %u | Subtype: 0x%02X\n", fctl, type, subtype);
       //parseDataFrame(frame, ppkt->rx_ctrl.sig_len);
     }
     //----------------------
     // Parse Information Elements
-    parseMgmtFrame(ppkt->payload, ppkt->rx_ctrl.sig_len, cap);
+    parseMgmtFrame(ieData, ieLen, cap);
     // Merge extracted mgmtInfo into per-MAC stats
     MacStats& stats = macStatsMap[cap.senderMac];
 

@@ -26,7 +26,7 @@ void addSsidToStats(MacStats& stats, const String& ssid) {
   if (ssid.length() == 0) return;
 
   if (stats.mgmt.seenSsids.insert(ssid).second) {
-    Serial.println("[📡] New SSID discovered for MAC: \"" + ssid + "\"");
+    Serial.println("[📡] New SSID discovered for MAC (addSsidToStats): \"" + ssid + "\"");
   }
 }
 
@@ -644,6 +644,101 @@ uint16_t ieLen = len - offset;
 
 void parseMgmtIEs(const uint8_t* data, uint16_t len, DeviceCapture& cap) {
   int offset = 0;
+
+  while (offset + 2 <= len) {
+    uint8_t id = data[offset];
+    uint8_t tagLen = data[offset + 1];
+
+    if (offset + 2 + tagLen > len) break;
+
+    const uint8_t* tagData = data[offset + 2];
+
+    // ✅ SSID parsing (copy of working extractSsid logic)
+    if (id == 0 && tagLen <= 32) {
+      if (tagLen == 0) {
+        cap.mgmtInfo.ssid = "";
+      } else {
+        String ssid = "";
+        for (int i = 0; i < tagLen; ++i) {
+          char c = data[offset + 2 + i];
+          //char c = tagData[i];
+          if (c >= 32 && c <= 126) ssid += c;
+        }
+        cap.mgmtInfo.ssid = ssid;
+        if (ssid.length()) {
+          Serial.println("📶 [SSID] Extracted (parseMgmtIEs): \"" + ssid + "\"");
+
+          // Register in global MAC stats
+          addSsidToStats(macStatsMap[cap.senderMac], ssid);
+
+        }
+      }
+    }
+
+    // WPS IE
+    else if (id == 221 && tagLen >= 4 &&
+             tagData[0] == 0x00 && tagData[1] == 0x50 &&
+             tagData[2] == 0xF2 && tagData[3] == 0x04) {
+      cap.mgmtInfo.wps = parseWpsIE(tagData + 4, tagLen - 4);
+    }
+
+    // Other ASCII-looking IEs
+    parseUnknownAsciiIe(id, tagData, tagLen, cap.mgmtInfo.asciiHints);
+
+    offset += 2 + tagLen;
+  }
+}
+
+/*
+void parseMgmtIEs(const uint8_t* ieData, uint16_t ieLen, DeviceCapture& cap) {
+  int pos = 0;
+  bool foundSsid = false;
+
+  while (pos + 2 <= ieLen) {
+    uint8_t tagNumber = ieData[pos];
+    uint8_t tagLength = ieData[pos + 1];
+
+    if (pos + 2 + tagLength > ieLen) {
+      // Don't proceed beyond bounds
+      break;
+    }
+
+    const uint8_t* tagData = ieData + pos + 2;
+
+    // SSID (tag 0)
+    if (tagNumber == 0x00 && tagLength <= 32 && !foundSsid) {
+      String ssid = "";
+      for (int i = 0; i < tagLength; ++i) {
+        ssid += (char)tagData[i];  // Accept even non-printable
+      }
+
+      if (tagLength > 0) {
+        cap.mgmtInfo.ssid = ssid;
+        Serial.println("📶 [SSID] Extracted: \"" + ssid + "\"");
+        MacStats& stats = macStatsMap[cap.senderMac];
+        addSsidToStats(stats, ssid);
+        foundSsid = true;
+      }
+
+    }
+
+    // WPS IE: tag 0xDD + OUI 00:50:F2 + type 0x04
+    else if (tagNumber == 0xDD && tagLength >= 4 &&
+             tagData[0] == 0x00 && tagData[1] == 0x50 &&
+             tagData[2] == 0xF2 && tagData[3] == 0x04) {
+      cap.mgmtInfo.wps = parseWpsIE(tagData + 4, tagLength - 4);
+    }
+
+    // ASCII-looking unknown tags
+    parseUnknownAsciiIe(tagNumber, tagData, tagLength, cap.mgmtInfo.asciiHints);
+
+    pos += 2 + tagLength;
+  }
+}
+*/
+/*
+void parseMgmtIEs(const uint8_t* data, uint16_t len, DeviceCapture& cap) {
+  int offset = 0;
   bool foundSsid = false;
   while (offset + 2 <= len) {
     uint8_t id = data[offset];
@@ -653,20 +748,22 @@ void parseMgmtIEs(const uint8_t* data, uint16_t len, DeviceCapture& cap) {
     const uint8_t* tagData = data + offset + 2;
 
     if (id == 0 && tagLen <= 32) {
+      if(!foundSsid) {
       String ssid = "";
       for (int i = 0; i < tagLen; ++i) {
         char c = tagData[i];
         if (c >= 32 && c <= 126) ssid += c;
       }
+      Serial.println("📶 [SSID] Extracted (1): \"" + ssid + "\"");
       // Only store the first non-empty SSID
-      if (!foundSsid && ssid.length()) {
+      if (ssid.length()) {
         cap.mgmtInfo.ssid = ssid;
-        Serial.println("📶 [SSID] Extracted: \"" + ssid + "\"");
+        Serial.println("📶 [SSID] Extracted (2): \"" + ssid + "\"");
         MacStats& stats = macStatsMap[cap.senderMac];
         addSsidToStats(stats, ssid);
-        foundSsid = true;  // lock in first valid SSID
+        foundSsid = true;  // lock in first valid SSID 
       }
-
+      }
     }
 //    if (id == 0 && tagLen <= 32) {
 //      String ssid = extractSsid(data + offset, len - offset);
@@ -685,6 +782,7 @@ void parseMgmtIEs(const uint8_t* data, uint16_t len, DeviceCapture& cap) {
     offset += 2 + tagLen;
   }
 }
+*/
 
 wpsFingerprint parseWpsIE(const uint8_t* data, int len) {
   wpsFingerprint fp;
