@@ -3,6 +3,10 @@
 #include <stdio.h>
 #include <SD.h>
 #include "nvs_flash.h"
+#include <map>
+#include <set>
+#include <vector>   // ← Fixes the error you're seeing
+#include <algorithm>  // ← Required for std::sort
 
 #define SD_CS 5  // or your CS pin
 
@@ -12,6 +16,198 @@ std::map<FrameStatKey, int> globalFrameStats;
 //=============================================================
 // Helpers
 //=============================================================
+bool isLikelyEui64(const uint8_t* addr) {
+  // Check for FF:FE at positions 11 and 12 (bytes 8 and 9 of the IID)
+  return (addr[11] == 0xFF && addr[12] == 0xFE);
+}
+
+String extractMacFromEUI64(const uint8_t* addr) {
+  uint8_t mac[6];
+  mac[0] = addr[8] ^ 0x02; // Flip the U/L bit
+  mac[1] = addr[9];
+  mac[2] = addr[10];
+  mac[3] = addr[13];
+  mac[4] = addr[14];
+  mac[5] = addr[15];
+
+  char macStr[18];
+  snprintf(macStr, sizeof(macStr), "%02X:%02X:%02X:%02X:%02X:%02X",
+           mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+
+  return String(macStr);
+}
+
+void printFlowSummary(const std::map<String, uint32_t>& flowCounts,
+                      const std::map<String, uint64_t>& flowBytes,
+                      const std::map<String, uint64_t>& flowBytesSq,
+                      const char* label = "Flows",
+                      size_t maxToShow = 7) {
+  if (flowCounts.empty()) return;
+
+  Serial.printf("📶 %s:\n", label);
+
+  // Convert to vector for sorting
+  std::vector<std::pair<String, uint32_t>> sorted(flowCounts.begin(), flowCounts.end());
+
+  std::sort(sorted.begin(), sorted.end(),
+            [](const std::pair<String, uint32_t>& a, const std::pair<String, uint32_t>& b) {
+              return a.second > b.second;
+            });
+
+  size_t shown = 0;
+  uint32_t totalShown = 0;
+
+  for (const auto& pair : sorted) {
+    const String& flow = pair.first;
+    uint32_t count = pair.second;
+
+    if (shown++ < maxToShow) {
+      uint32_t totalBytes = flowBytes.count(flow) ? flowBytes.at(flow) : 0;
+      float mean = (count > 0) ? ((float)totalBytes / count) : 0.0;
+
+      // For now, assume no per-packet size tracking, so stdDev is zero
+      // You can later add stdDevBytes[flow] if needed
+      Serial.printf("  %s : %u pkts, %.1f B/packet\n", flow.c_str(), count, mean);
+
+      totalShown += count;
+    } else {
+      break;
+    }
+  }
+
+  if (flowCounts.size() > maxToShow) {
+    size_t remaining = flowCounts.size() - maxToShow;
+    Serial.printf("  + %zu more flows not shown\n", remaining);
+  }
+}
+
+/*
+void printIpv4FlowSummary(const std::map<String, uint32_t>& ipv4Flows,
+                          const std::map<String, uint64_t>& ipv4FlowBytes,
+                          const std::map<String, std::set<String>>& dnsHostnamesByFlow,
+                          int maxFlows = 7) {
+  if (ipv4Flows.empty()) return;
+
+  Serial.println("    🧭 IPv4 Flows:");
+
+  // Sort by count descending
+  std::vector<std::pair<String, uint32_t>> flowVec(ipv4Flows.begin(), ipv4Flows.end());
+  std::sort(flowVec.begin(), flowVec.end(),
+          [](const std::pair<String, uint32_t>& a, const std::pair<String, uint32_t>& b) {
+              return a.second > b.second;
+          });
+
+
+  int shown = 0;
+
+  for (const auto& kv : flowVec) {
+    if (shown >= maxFlows) break;
+
+    const String& flowKey = kv.first;
+    uint32_t pktCount = kv.second;
+    uint64_t byteCount = 0;
+
+    auto itByte = ipv4FlowBytes.find(flowKey);
+    if (itByte != ipv4FlowBytes.end()) {
+      byteCount = itByte->second;
+    }
+
+    Serial.printf("        • %s : %u pkts, %.1f KB\n", flowKey.c_str(), pktCount, byteCount / 1024.0);
+
+    auto itHost = dnsHostnamesByFlow.find(flowKey);
+    if (itHost != dnsHostnamesByFlow.end() && !itHost->second.empty()) {
+      Serial.print("          Hostnames: ");
+      int i = 0;
+      for (const String& hostname : itHost->second) {
+        if (i++ > 0) Serial.print(" | ");
+        Serial.print(hostname);
+      }
+      Serial.println();
+    }
+
+    ++shown;
+  }
+
+  int extra = flowVec.size() - shown;
+  if (extra > 0) {
+    Serial.printf("        ... + %d more flows\n", extra);
+  }
+}
+
+void printIpv6FlowSummary(const std::map<String, uint32_t>& ipv6Flows,
+                          const std::map<String, uint64_t>& ipv6FlowBytes,
+                          int maxFlows = 7) {
+  if (ipv6Flows.empty()) return;
+
+  Serial.println("    🧭 IPv6 Flows:");
+
+  std::vector<std::pair<String, uint32_t>> flowVec(ipv6Flows.begin(), ipv6Flows.end());
+  std::sort(flowVec.begin(), flowVec.end(),
+          [](const std::pair<String, uint32_t>& a, const std::pair<String, uint32_t>& b) {
+              return a.second > b.second;
+          });
+
+  int shown = 0;
+
+  for (const auto& kv : flowVec) {
+    if (shown >= maxFlows) break;
+
+    const String& flowKey = kv.first;
+    uint32_t pktCount = kv.second;
+    uint64_t byteCount = 0;
+
+    auto itByte = ipv6FlowBytes.find(flowKey);
+    if (itByte != ipv6FlowBytes.end()) {
+      byteCount = itByte->second;
+    }
+
+    Serial.printf("        • %s : %u pkts, %.1f KB\n", flowKey.c_str(), pktCount, byteCount / 1024.0);
+    ++shown;
+  }
+
+  int extra = flowVec.size() - shown;
+  if (extra > 0) {
+    Serial.printf("        ... + %d more flows\n", extra);
+  }
+}
+*/
+
+String extractIPv6Prefix(const uint8_t* addr) {
+  char prefix[40];
+  snprintf(prefix, sizeof(prefix), "%02x%02x:%02x%02x:%02x%02x:%02x%02x::/64",
+           addr[0], addr[1], addr[2], addr[3],
+           addr[4], addr[5], addr[6], addr[7]);
+  return String(prefix);
+}
+
+String formatIPv6(const uint8_t* addr, bool annotate = true) {
+  char buf[40];
+  snprintf(buf, sizeof(buf),
+           "%02X%02X:%02X%02X:%02X%02X:%02X%02X:"
+           "%02X%02X:%02X%02X:%02X%02X:%02X%02X",
+           addr[0], addr[1], addr[2], addr[3],
+           addr[4], addr[5], addr[6], addr[7],
+           addr[8], addr[9], addr[10], addr[11],
+           addr[12], addr[13], addr[14], addr[15]);
+
+  String ip(buf);
+
+  if (!annotate) return ip;
+
+  // Append helpful labels
+  if (ip.startsWith("FE80")) ip += " 🔗 link-local";
+  else if (ip.startsWith("FF02::1")) ip += " 🔉 all-nodes";
+  else if (ip.startsWith("FF02::2")) ip += " 📣 all-routers";
+  else if (ip.startsWith("2001:4860:4860::8888")) ip += " 🌐 Google DNS";
+
+  if (isLikelyEui64(addr)) {
+    String mac = extractMacFromEUI64(addr);
+    ip += " 🧬 EUI-64 MAC: " + mac;
+  }
+
+  return ip;
+}
+
 const char* directionToStr(FrameDirection dir) {
   switch (dir) {
     case DIR_CLIENT_TO_AP: return "Cl→AP";
@@ -70,7 +266,7 @@ String extractSsid(const uint8_t* payload, int len) {
     uint8_t tagLen = payload[offset + 1];
 
     if (offset + 2 + tagLen > len) break;
-
+    Serial.printf("[DEBUG extractSsid] tagLen=%d, offset=%d, ieLen=%d\n", tagLen, offset, len);
     if (id == 0 && tagLen <= 32) {  // SSID tag
       if (tagLen == 0) return "";  // hidden SSID
 
@@ -212,43 +408,54 @@ void printIEsDebug(const uint8_t* ieData, int ieLen) {
       case 0x00: tagName = "SSID"; break;
       case 0x01: tagName = "Supported Rates"; break;
       case 0x03: tagName = "DS Parameter Set (Channel)"; break;
-      case 0x32: tagName = "Extended Supported Rates"; break;
-      case 0x30: tagName = "RSN"; break;
+      case 0x07: tagName = "Country Code"; break;
       case 0x2A: tagName = "Power Capability"; break;
       case 0x2B: tagName = "Supported Channels"; break;
-      case 0x46: tagName = "QoS Capability"; break;
+      case 0x2D: tagName = "HT Capabilities"; break;
+      case 0x30: tagName = "RSN"; break;
+      case 0x32: tagName = "Extended Supported Rates"; break;
       case 0x36: tagName = "HT Capabilities"; break;
       case 0x3D: tagName = "HT Information"; break;
-      case 0x2D: tagName = "HT Capabilities"; break;
+      case 0x46: tagName = "QoS Capability"; break;
+      case 0x4A: tagName = "Neighbor Report"; break;
       case 0x7F: tagName = "Extended Capabilities"; break;
       case 0xDD: tagName = "Vendor Specific"; break;
-      case 0x4A: tagName = "Neighbor Report"; break;
       default:   tagName = "Unknown"; break;
     }
 
     Serial.printf("  Tag: 0x%02X (%3d) %-25s Len: %2d → ", tagNumber, tagNumber, tagName.c_str(), tagLength);
 
-    // ASCII or hex content
-    bool printable = true;
-    for (int i = 0; i < tagLength; ++i) {
-      if (ieData[pos + 2 + i] < 32 || ieData[pos + 2 + i] > 126) {
-        printable = false;
-        break;
-      }
-    }
-
-    if (printable && tagLength > 0) {
-      Serial.print("ASCII: ");
-      for (int i = 0; i < tagLength; ++i) {
-        Serial.print((char)ieData[pos + 2 + i]);
-      }
-      Serial.println();
+    // Special case for Country Code
+    if (tagNumber == 0x07 && tagLength >= 3) {
+      char country[4] = {0};
+      country[0] = (char)ieData[pos + 2];
+      country[1] = (char)ieData[pos + 3];
+      country[2] = (char)ieData[pos + 4];
+      Serial.print("Country Code: ");
+      Serial.println(country);
     } else {
-      Serial.print("HEX: ");
+      // ASCII or hex content
+      bool printable = true;
       for (int i = 0; i < tagLength; ++i) {
-        Serial.printf("%02X ", ieData[pos + 2 + i]);
+        if (ieData[pos + 2 + i] < 32 || ieData[pos + 2 + i] > 126) {
+          printable = false;
+          break;
+        }
       }
-      Serial.println();
+
+      if (printable && tagLength > 0) {
+        Serial.print("ASCII: ");
+        for (int i = 0; i < tagLength; ++i) {
+          Serial.print((char)ieData[pos + 2 + i]);
+        }
+        Serial.println();
+      } else {
+        Serial.print("HEX: ");
+        for (int i = 0; i < tagLength; ++i) {
+          Serial.printf("%02X ", ieData[pos + 2 + i]);
+        }
+        Serial.println();
+      }
     }
 
     pos += 2 + tagLength;
@@ -258,6 +465,7 @@ void printIEsDebug(const uint8_t* ieData, int ieLen) {
     Serial.printf("[WARN] Remaining %d bytes at end of IE section\n", ieLen - pos);
   }
 }
+
 
 String classifyDestMacPurpose(const uint8_t* mac) {
   // Broadcast
@@ -407,7 +615,7 @@ void updateMacStatsFromGlobalItems(const DeviceCapture& cap) {
   stats.bssidSummaries.insert(bssidSummary);
   
 }
-//---Mgmt frame parsing---------------------
+//---Data frame parsing---------------------
 
 void parseDataFrame(const uint8_t* frame, uint16_t len, const DeviceCapture& cap) {
   if (cap.frameType != 2) return;
@@ -417,7 +625,10 @@ void parseDataFrame(const uint8_t* frame, uint16_t len, const DeviceCapture& cap
 
   uint8_t macHeaderLen = 24;
   if (cap.directionCode == DIR_WDS) macHeaderLen += 6;
-  bool isQoS = (cap.subtype == 0x0C || cap.subtype == 0x0D);
+  //bool isQoS = (cap.subtype == 0x0C || cap.subtype == 0x0D);
+  //bool isQoS = (cap.subtype & 0x08); // bits 2-3 indicate QoS frame
+  bool isQoS = cap.subtype >= 0x08 && cap.subtype <= 0x0F;
+
   if (isQoS) macHeaderLen += 2;
 
   if (len < macHeaderLen) return;
@@ -430,23 +641,23 @@ void parseDataFrame(const uint8_t* frame, uint16_t len, const DeviceCapture& cap
     bool amsdu = qos1 & 0x20;
 
     if (cap.directionCode == DIR_CLIENT_TO_AP) {
-      stats.qosUpCount++;
-      stats.tidUpSum += tid;
-      stats.tidUpSqSum += tid * tid;
-      stats.amsduUpSum += amsdu;
-      stats.eospUpSum += eosp;
-      stats.qosLenUpSum += cap.length;
-      stats.qosLenUpSqSum += cap.length * cap.length;
-      if (cap.isEncrypted) stats.encryptedUpCount++;
+      stats.df.qosUpCount++;
+      stats.df.tidUpSum += tid;
+      stats.df.tidUpSqSum += tid * tid;
+      stats.df.amsduUpSum += amsdu;
+      stats.df.eospUpSum += eosp;
+      stats.df.qosLenUpSum += cap.length;
+      stats.df.qosLenUpSqSum += cap.length * cap.length;
+      if (cap.isEncrypted) stats.df.encryptedUpCount++;
     } else if (cap.directionCode == DIR_AP_TO_CLIENT) {
-      stats.qosDownCount++;
-      stats.tidDownSum += tid;
-      stats.tidDownSqSum += tid * tid;
-      stats.amsduDownSum += amsdu;
-      stats.eospDownSum += eosp;
-      stats.qosLenDownSum += cap.length;
-      stats.qosLenDownSqSum += cap.length * cap.length;
-      if (cap.isEncrypted) stats.encryptedDownCount++;
+      stats.df.qosDownCount++;
+      stats.df.tidDownSum += tid;
+      stats.df.tidDownSqSum += tid * tid;
+      stats.df.amsduDownSum += amsdu;
+      stats.df.eospDownSum += eosp;
+      stats.df.qosLenDownSum += cap.length;
+      stats.df.qosLenDownSqSum += cap.length * cap.length;
+      if (cap.isEncrypted) stats.df.encryptedDownCount++;
     }
 
     Serial.printf("🎯 QoS Control: TID = %u | A-MSDU = %s | EOSP = %s%s\n",
@@ -465,10 +676,30 @@ void parseDataFrame(const uint8_t* frame, uint16_t len, const DeviceCapture& cap
 
   uint32_t oui = (llc[3] << 16) | (llc[4] << 8) | llc[5];
   uint16_t etherType = (llc[6] << 8) | llc[7];
+  Serial.printf("[DEBUG] EtherType detected: 0x%04X\n", etherType);
+  switch (etherType) {
+    case 0x0806: stats.df.etherTypeSummaryCounts["ARP"]++; break;
+    case 0x888E: stats.df.etherTypeSummaryCounts["EAPOL"]++; break;
+    case 0x8100: stats.df.etherTypeSummaryCounts["802.1Q VLAN"]++; break;
+    case 0x8847: stats.df.etherTypeSummaryCounts["MPLS"]++; break;
+    case 0x8864: stats.df.etherTypeSummaryCounts["PPP-over-E"]++; break;
+    case 0x88CC: stats.df.etherTypeSummaryCounts["LLDP"]++; break;
+    default: {
+      // Only count this if it’s not IPv4/IPv6, those are parsed further below
+      if (etherType != 0x0800 && etherType != 0x86DD) {
+       char label[16];
+       snprintf(label, sizeof(label), "0x%04X", etherType);
+       stats.df.etherTypeSummaryCounts[label]++;
+      }
+      break;
+    }
+  }
+Serial.printf("[DEBUG] EtherType categorized and counted: 0x%04X\n", etherType);
+
   const uint8_t* payload = llc + 8;
   uint16_t payloadLen = len - (macHeaderLen + 8);
 
-  stats.etherTypes.insert(etherType);
+  stats.df.etherTypes.insert(etherType);
   Serial.printf("\n📦 EtherType: 0x%04X\n", etherType);
   if (oui != 0x000000) {
     Serial.printf("🔧 OUI: 0x%06X (non-standard encapsulation)\n", oui);
@@ -481,27 +712,59 @@ void parseDataFrame(const uint8_t* frame, uint16_t len, const DeviceCapture& cap
     uint8_t ihl = (ip[0] & 0x0F) * 4;
     uint8_t protocol = ip[9];
 
-    char srcIp[16], dstIp[16];
-    snprintf(srcIp, sizeof(srcIp), "%u.%u.%u.%u", ip[12], ip[13], ip[14], ip[15]);
-    snprintf(dstIp, sizeof(dstIp), "%u.%u.%u.%u", ip[16], ip[17], ip[18], ip[19]);
-    stats.ipv4Addrs.insert(String(srcIp));
-    stats.ipv4Addrs.insert(String(dstIp));
-    Serial.printf("IPv4: %s → %s | Proto: 0x%02X\n", srcIp, dstIp, protocol);
+char srcIp[16], dstIp[16];
+snprintf(srcIp, sizeof(srcIp), "%u.%u.%u.%u", ip[12], ip[13], ip[14], ip[15]);
+snprintf(dstIp, sizeof(dstIp), "%u.%u.%u.%u", ip[16], ip[17], ip[18], ip[19]);
+
+String flowKey = String(srcIp) + " → " + String(dstIp);
+String label = "IPv4/Other";
+
+// Add detail based on transport protocol
+if (protocol == 0x11 && payloadLen >= ihl + 8) {
+  // UDP
+  const uint8_t* udp = ip + ihl;
+  uint16_t srcPort = (udp[0] << 8) | udp[1];
+  uint16_t dstPort = (udp[2] << 8) | udp[3];
+
+  if (dstPort == 53 || srcPort == 53)
+    label = "IPv4/UDP/DNS";
+  else if (dstPort == 5353 || srcPort == 5353)
+    label = "IPv4/UDP/mDNS";
+  else
+    label = "IPv4/UDP";
+}
+else if (protocol == 0x06 && payloadLen >= ihl + 20) {
+  label = "IPv4/TCP";
+}
+
+flowKey = String(srcIp) + " → " + String(dstIp) + " (" + label + ")";
+stats.df.ipv4Flows[flowKey]++;
+Serial.printf("🧭 IPv4 Flow: %s | +1 pkt, +%u bytes [%s]\n", 
+              flowKey.c_str(), payloadLen, label.c_str());
+stats.df.ipv4FlowBytes[flowKey] += payloadLen;
+stats.df.ipv4FlowBytesSqSum[flowKey] += static_cast<uint64_t>(payloadLen) * payloadLen;
+Serial.printf("📊 Total bytes so far for %s: %llu\n", 
+              flowKey.c_str(), stats.df.ipv4FlowBytes[flowKey]);
+
 
     // ---------- UDP ----------
     if (protocol == 0x11 && payloadLen >= ihl + 8) {
       const uint8_t* udp = ip + ihl;
       uint16_t srcPort = (udp[0] << 8) | udp[1];
       uint16_t dstPort = (udp[2] << 8) | udp[3];
-      stats.udpPorts.insert(srcPort);
-      stats.udpPorts.insert(dstPort);
+      stats.df.udpPorts.insert(srcPort);
+      stats.df.udpPorts.insert(dstPort);
       Serial.printf("UDP: %u → %u\n", srcPort, dstPort);
 
       const uint8_t* dns = udp + 8;
       if (dstPort == 53 || srcPort == 53 || dstPort == 5353 || srcPort == 5353) {
-        if (dstPort == 53 || srcPort == 53) stats.dnsCount++;
-        else stats.mdnsCount++;
-
+        if (dstPort == 53 || srcPort == 53) {
+          stats.df.etherTypeSummaryCounts["IPv4/UDP/DNS"]++;
+        } else if (dstPort == 5353 || srcPort == 5353) {
+          stats.df.etherTypeSummaryCounts["IPv4/UDP/mDNS"]++;
+        } else{
+          stats.df.etherTypeSummaryCounts["IPv4/UDP"]++;
+        }
         const uint8_t* ptr = dns + 12;
         String hostname;
         while (*ptr && ptr < payload + payloadLen) {
@@ -512,8 +775,9 @@ void parseDataFrame(const uint8_t* frame, uint16_t len, const DeviceCapture& cap
         }
         hostname.trim();
         if (hostname.length()) {
-          Serial.printf("🔍 DNS Query: %s\n", hostname.c_str());
-          stats.dnsHostnames.insert(hostname);
+            stats.df.dnsHostnames.insert(hostname);  // (optional global set)
+            stats.df.dnsHostnamesByFlow[flowKey].insert(hostname);
+            Serial.printf("🔍 DNS Query: %s\n", hostname.c_str());
         }
       }
     }
@@ -524,60 +788,90 @@ void parseDataFrame(const uint8_t* frame, uint16_t len, const DeviceCapture& cap
       uint16_t srcPort = (tcp[0] << 8) | tcp[1];
       uint16_t dstPort = (tcp[2] << 8) | tcp[3];
       uint8_t flags = tcp[13];
-      stats.tcpPorts.insert(srcPort);
-      stats.tcpPorts.insert(dstPort);
+      stats.df.tcpPorts.insert(srcPort);
+      stats.df.tcpPorts.insert(dstPort);
 
       Serial.printf("TCP: %u → %u | Flags:", srcPort, dstPort);
       if (flags & 0x02) Serial.print(" SYN");
       if (flags & 0x10) Serial.print(" ACK");
       if (flags & 0x01) Serial.print(" FIN");
       Serial.println();
+      stats.df.etherTypeSummaryCounts["IPv4/TCP"]++;
+    } else {
+        stats.df.etherTypeSummaryCounts["IPv4/Other"]++;
     }
 
     extractAsciiPayloadFromDF(payload, payloadLen);
   }
 
   // ---------- IPv6 ----------
-  else if (etherType == 0x86DD && payloadLen >= 40) {
-    Serial.println("🌐 IPv6 Packet");
-    const uint8_t* ip6 = payload;
-    uint8_t nextHeader = ip6[6];
-    uint8_t hopLimit = ip6[7];
+else if (etherType == 0x86DD && payloadLen >= 40) {
+  Serial.println("🌐 IPv6 Packet");
+  const uint8_t* ip6 = payload;
+  uint8_t nextHeader = ip6[6];
+  uint8_t hopLimit = ip6[7];
 
-    char srcIp[8], dstIp[8];
-    snprintf(srcIp, sizeof(srcIp), "%02X:%02X", ip6[8], ip6[9]);
-    snprintf(dstIp, sizeof(dstIp), "%02X:%02X", ip6[24], ip6[25]);
+  //---- Optional MAC extraction
+  if (isLikelyEui64(ip6)) {
+    String recoveredMac = extractMacFromEUI64(ip6);
+    Serial.println("🔍 EUI-64 detected. MAC reconstructed: " + recoveredMac);
+    // stats.df.eui64Macs.insert(recoveredMac);  // optional
+  }
 
-    stats.ipv6Addrs.insert(String(srcIp));
-    stats.ipv6Addrs.insert(String(dstIp));
+  // Format full IPv6 addresses
+  String srcPlain = formatIPv6(ip6 + 8, /*annotate=*/false);
+  String dstPlain = formatIPv6(ip6 + 24, /*annotate=*/false);
+  String label = "IPv6/Other";
 
-    Serial.printf("IPv6: %s → %s | NH: 0x%02X | HL: %d\n", srcIp, dstIp, nextHeader, hopLimit);
+  // ---------- ICMPv6 ----------
+  if (nextHeader == 58 && payloadLen >= 44) {
+    const uint8_t* icmp6 = ip6 + 40;
+    uint8_t type = icmp6[0];
 
-    if (nextHeader == 58 && payloadLen >= 40 + 4) {
-      const uint8_t* icmp6 = ip6 + 40;
-      uint8_t type = icmp6[0];
-      String label;
-
-      switch (type) {
-        case 133: label = "Router Solicitation"; break;
-        case 134: label = "Router Advertisement"; break;
-        case 135: label = "Neighbor Solicitation"; break;
-        case 136: label = "Neighbor Advertisement"; break;
-        default: label = "Other ICMPv6"; break;
-      }
-
-      Serial.printf("📢 ICMPv6 Type: %d — %s\n", type, label.c_str());
-      stats.icmpv6Types.insert(label);
+    switch (type) {
+      case 133: label = "IPv6/ICMPv6/RS"; break;
+      case 134: label = "IPv6/ICMPv6/RA"; break;
+      case 135: label = "IPv6/ICMPv6/NS"; break;
+      case 136: label = "IPv6/ICMPv6/NA"; break;
+      default:  label = "IPv6/ICMPv6/Other"; break;
     }
 
-    extractAsciiPayloadFromDF(payload, payloadLen);
+    stats.df.icmpv6Types.insert(label);
   }
+
+  // ---------- TCP ----------
+  else if (nextHeader == 6 && payloadLen >= 60) {
+    label = "IPv6/TCP";
+  }
+
+  // ---------- UDP ----------
+  else if (nextHeader == 17 && payloadLen >= 48) {
+    label = "IPv6/UDP";
+  }
+
+  // Track flow *after* determining the label
+  stats.df.etherTypeSummaryCounts[label]++;
+  String flowKey = srcPlain + " → " + dstPlain + " (" + label + ")";
+  stats.df.ipv6Flows[flowKey]++;
+  Serial.printf("🧭 IPv6 Flow: %s | +1 pkt, +%u bytes [%s]\n", 
+              flowKey.c_str(), payloadLen, label.c_str());
+  stats.df.ipv6FlowBytes[flowKey] += payloadLen;
+  stats.df.ipv6FlowBytesSqSum[flowKey] += static_cast<uint64_t>(payloadLen) * payloadLen;
+  Serial.printf("📊 Total bytes so far for %s: %llu\n", 
+              flowKey.c_str(), stats.df.ipv6FlowBytes[flowKey]);
+
+
+  extractAsciiPayloadFromDF(payload, payloadLen);
+}
 
   // ---------- Raw / Vendor Multicast ----------
   else if (etherType < 0x0600) {
     Serial.printf("📎 Possibly Length: %d — Vendor tag or raw payload?\n", etherType);
+    stats.df.etherTypeSummaryCounts["Raw/Vendor"]++;
     extractAsciiPayloadFromDF(payload, payloadLen);
   }
+  //Serial.printf("🧾 EtherType Summary: %s → count: %u\n", 
+  //            label.c_str(), stats.df.etherTypeSummaryCounts[label]);
 
   // ---------- Save ASCII from QoS frames ----------
   if (isQoS) {
@@ -585,6 +879,7 @@ void parseDataFrame(const uint8_t* frame, uint16_t len, const DeviceCapture& cap
     if (ascii.length()) stats.asciiStrings.insert(ascii);
   }
 }
+
 //---Mgmt frame parsing---------------------
 void parseMgmtFrame(const uint8_t* frame, uint16_t len, DeviceCapture& cap) {
   if (len < 24) return;  // sanity check
@@ -650,9 +945,12 @@ void parseMgmtIEs(const uint8_t* data, uint16_t len, DeviceCapture& cap) {
     uint8_t tagLen = data[offset + 1];
 
     if (offset + 2 + tagLen > len) break;
+    
+    //Serial.printf("[DEBUG parseMgmtIEs] tagLen=%d, offset=%d, ieLen=%d\n", tagLen, offset, len);
 
-    const uint8_t* tagData = data[offset + 2];
-
+    const uint8_t* tagData = data + offset + 2;
+    //Serial.printf("[DEBUG parseMgmtIEs] tagLen=%d, offset=%d, ieLen=%d\n", tagLen, offset, ieLen);
+    /* SSID extreaction not working here - Do it outside of parseMgmtIEs using extractSsid() which works
     // ✅ SSID parsing (copy of working extractSsid logic)
     if (id == 0 && tagLen <= 32) {
       if (tagLen == 0) {
@@ -664,9 +962,11 @@ void parseMgmtIEs(const uint8_t* data, uint16_t len, DeviceCapture& cap) {
           //char c = tagData[i];
           if (c >= 32 && c <= 126) ssid += c;
         }
-        cap.mgmtInfo.ssid = ssid;
+        Serial.println("📶 [SSID] Extracted (parseMgmtIEs 1): \"" + ssid + "\"");
+        cap.mgmtInfo.ssid = ssid.length() ? ssid : "";
+        //cap.mgmtInfo.ssid = ssid;
         if (ssid.length()) {
-          Serial.println("📶 [SSID] Extracted (parseMgmtIEs): \"" + ssid + "\"");
+          Serial.println("📶 [SSID] Extracted (parseMgmtIEs 2): \"" + ssid + "\"");
 
           // Register in global MAC stats
           addSsidToStats(macStatsMap[cap.senderMac], ssid);
@@ -674,13 +974,28 @@ void parseMgmtIEs(const uint8_t* data, uint16_t len, DeviceCapture& cap) {
         }
       }
     }
+    END SSID EXTRACTION BLOCK */
 
     // WPS IE
-    else if (id == 221 && tagLen >= 4 &&
+    //else if (id == 221 && tagLen >= 4 &&
+    if (id == 221 && tagLen >= 4 &&
              tagData[0] == 0x00 && tagData[1] == 0x50 &&
              tagData[2] == 0xF2 && tagData[3] == 0x04) {
       cap.mgmtInfo.wps = parseWpsIE(tagData + 4, tagLen - 4);
     }
+        // Country Code
+    else if (id == 0x07 && tagLen >= 3) {
+      String cc = "";
+      for (int i = 0; i < 3; ++i) {
+        char c = data[offset + 2 + i];
+        if (c >= 32 && c <= 126) cc += c;  // Printable ASCII
+      }
+      if (cc.length() == 3) {
+        cap.mgmtInfo.countryCode = cc;
+        Serial.println("🌍 [Country Code] Detected: " + cc);
+      }
+    }
+
 
     // Other ASCII-looking IEs
     parseUnknownAsciiIe(id, tagData, tagLen, cap.mgmtInfo.asciiHints);
@@ -974,7 +1289,7 @@ void debugPrintGlobalInfo(const DeviceCapture& cap) {
 
 void printGlobalMacStats() {
   Serial.println(F("\n📊 Device Summary After Scan"));
-  Serial.println(F("MAC(ven)                     Combos            Pkts   LenAvg/Std   Chs    RSSImin/max  First/Last (s)"));
+  Serial.println(F("MAC(ven)                     Combos         Cty   Pkts   LenAvg/Std   Chs    RSSImin/max  First/Last (s)"));
   Serial.println(F("---------------------------------------------------------------------------------------------------------"));
   int ephemeralProberCount = 0;
   for (const auto& kv : macStatsMap) {
@@ -1002,14 +1317,15 @@ void printGlobalMacStats() {
     uint32_t first = stats.firstSeen / 1000;
     uint32_t last  = stats.lastSeen  / 1000;
 
-    // Set aside ephemeral probers to declutter table
+    // Set aside ephemeral probers to declutter table — unless they revealed an SSID
     comboStr.trim();
     if (vendor == "Unknwn" &&
-      stats.packetCount <= 3 &&
-      (comboStr == "00411" || comboStr == "00412") &&
-      (last - first <= 2) &&
-      stats.rxMacSummaries.count("FF:FF:FF(BC)") &&
-      stats.bssidSummaries.count("FF:FF:FF(Unknwn)")) {
+        stats.packetCount <= 3 &&
+        (comboStr == "00411" || comboStr == "00412") &&
+        (last - first <= 2) &&
+        stats.rxMacSummaries.count("FF:FF:FF(BC)") &&
+        stats.bssidSummaries.count("FF:FF:FF(Unknwn)") &&
+        stats.mgmt.seenSsids.empty()) {  // ← allow if we saw an SSID
       ephemeralProberCount++;
       continue;  // ✅ Don't print this device in the table
     }
@@ -1026,17 +1342,17 @@ void printGlobalMacStats() {
     int8_t rssiMin = stats.rssiMin;
     int8_t rssiMax = stats.rssiMax;
 
-    // Print row
-    Serial.printf("%-10s %-20s   %3u  %5.1f/%-5.1f   %s  %3d/%-3d     %5lus/%5lus\n",
-                  (macShort + "(" + vendor + ")").c_str(),
-                  //rxSummaryStr.c_str(),
-                  //bssidSummaryStr.c_str(),
-                  comboStr.c_str(),
-                  stats.packetCount,
-                  meanLen, stdDevLen,
-                  formatChannelList(stats.channelsSeen).c_str(),
-                  rssiMin, rssiMax,
-                  first, last);
+    const char* cc = stats.mgmt.countryCode.length() ? stats.mgmt.countryCode.c_str() : "-";
+
+    Serial.printf("%-10s %-20s   %s   %5u   %5.1f/%-5.1f   %s  %3d/%-3d     %5lus/%5lus\n",
+              (macShort + "(" + vendor + ")").c_str(),
+              comboStr.c_str(),
+              cc,  // ✅ now safe, format matches %s
+              stats.packetCount,
+              meanLen, stdDevLen,
+              formatChannelList(stats.channelsSeen).c_str(),
+              rssiMin, rssiMax,
+              first, last);
 
     if (!stats.rxMacSummaries.empty()) {
       Serial.print("    → Rx MACs: ");
@@ -1058,27 +1374,112 @@ void printGlobalMacStats() {
       Serial.println();
     }
 
-if (!stats.mgmt.seenSsids.empty()){
-  Serial.print(" → SSIDs seen: ");
-  int count = 0;
+    if (!stats.mgmt.seenSsids.empty()){
+      Serial.print(" → SSIDs seen: ");
+      int count = 0;
       for (const String& entry : stats.mgmt.seenSsids) {
         if (count++ > 0) Serial.print("|");
         Serial.print(entry);
       }
       Serial.println();
-}
+    }
 
-if (stats.mgmt.asciiHints.length())
-  Serial.println("    → ASCII: " + stats.mgmt.asciiHints);
+    if (stats.mgmt.asciiHints.length())
+      Serial.println("    → ASCII: " + stats.mgmt.asciiHints);
 
-if (stats.mgmt.wps.wpsSumFxd.length())
-  Serial.println("    → WPS Fxd: " + stats.mgmt.wps.wpsSumFxd);
+    if (stats.mgmt.wps.wpsSumFxd.length())
+      Serial.println("    → WPS Fxd: " + stats.mgmt.wps.wpsSumFxd);
+
+    // QoS Uplink
+    if (stats.df.qosUpCount > 0) {
+      float meanTidUp = (float)stats.df.tidUpSum / stats.df.qosUpCount;
+      float stdTidUp = sqrt((float)stats.df.tidUpSqSum / stats.df.qosUpCount - meanTidUp * meanTidUp);
+
+      float meanLenUp = (float)stats.df.qosLenUpSum / stats.df.qosUpCount;
+      float stdLenUp = sqrt((float)stats.df.qosLenUpSqSum / stats.df.qosUpCount - meanLenUp * meanLenUp);
+
+      float amsduRateUp = (float)stats.df.amsduUpSum / stats.df.qosUpCount;
+      float eospRateUp = (float)stats.df.eospUpSum / stats.df.qosUpCount;
+      float encRateUp  = (float)stats.df.encryptedUpCount / stats.df.qosUpCount;
+
+      Serial.printf("    ↑ Up QoS:   pkts=%3u  TID=%.1f/%.1f  Len=%.1f/%.1f  A-MSDU=%.2f  EOSP=%.2f  ENC=%.2f\n",
+      stats.df.qosUpCount, meanTidUp, stdTidUp, meanLenUp, stdLenUp,
+      amsduRateUp, eospRateUp, encRateUp);
+    }
+
+    // QoS Downlink
+    if (stats.df.qosDownCount > 0) {
+      float meanTidDown = (float)stats.df.tidDownSum / stats.df.qosDownCount;
+      float stdTidDown = sqrt((float)stats.df.tidDownSqSum / stats.df.qosDownCount - meanTidDown * meanTidDown);
+
+      float meanLenDown = (float)stats.df.qosLenDownSum / stats.df.qosDownCount;
+      float stdLenDown = sqrt((float)stats.df.qosLenDownSqSum / stats.df.qosDownCount - meanLenDown * meanLenDown);
+
+      float amsduRateDown = (float)stats.df.amsduDownSum / stats.df.qosDownCount;
+      float eospRateDown  = (float)stats.df.eospDownSum / stats.df.qosDownCount;
+      float encRateDown   = (float)stats.df.encryptedDownCount / stats.df.qosDownCount;
+
+      Serial.printf("    ↓ Down QoS: pkts=%3u  TID=%.1f/%.1f  Len=%.1f/%.1f  A-MSDU=%.2f  EOSP=%.2f  ENC=%.2f\n",
+      stats.df.qosDownCount, meanTidDown, stdTidDown, meanLenDown, stdLenDown,
+      amsduRateDown, eospRateDown, encRateDown);
+    }
+
+    if (!stats.df.etherTypeSummaryCounts.empty()) {
+      Serial.print("    🔗 EtherTypes: ");
+
+      // Convert map to vector for sorting
+      std::vector<std::pair<String, uint32_t>> sorted(stats.df.etherTypeSummaryCounts.begin(), stats.df.etherTypeSummaryCounts.end());
+      std::sort(sorted.begin(), sorted.end(),
+          [](const std::pair<String, uint32_t>& a, const std::pair<String, uint32_t>& b) {
+            return a.second < b.second;
+          });
+      //std::sort(sorted.begin(), sorted.end(), [](auto& a, auto& b) {
+      //  return b.second < a.second;  // descending order
+      //});
+
+      int total = 0;
+      for (auto& pair : sorted) total += pair.second;
+
+      int shown = 0;
+      for (auto& pair : sorted) {
+        if (shown < 3 || pair.second > 1) {  // top 3 or repeated types
+          Serial.printf("%s(%u)  ", pair.first.c_str(), pair.second);
+          shown++;
+        }
+      }
+
+      if (shown < (int)sorted.size()) {
+        int otherCount = 0;
+        for (size_t i = shown; i < sorted.size(); ++i) {
+          otherCount += sorted[i].second;
+        }
+        Serial.printf("Other(%d)", otherCount);
+      }
+
+      printFlowSummary(
+        stats.df.ipv4Flows,
+        stats.df.ipv4FlowBytes,
+        stats.df.ipv4FlowBytesSqSum,
+        "IPv4 Flows",
+        7 //maxToShow
+      );
+
+      printFlowSummary(
+        stats.df.ipv6Flows,
+        stats.df.ipv6FlowBytes,
+        stats.df.ipv6FlowBytesSqSum,
+        "IPv6 Flows",
+        7 // maxToShow
+      );
+
+      Serial.println();
+    }
 
   } // End for loop
 
   Serial.println("-----------------------------------------------------------------------------------------------------\n");
   if (ephemeralProberCount > 0) {
-  Serial.printf("📉 %d ephemeral probers (1–2 probe requests, short lifespan, unknown vendor)\n", ephemeralProberCount);
+  Serial.printf("📉 %d ephemeral probers (1–2 probe requests, short lifespan, unknown vendor, no/only wildcard probed SSIDs detected)\n", ephemeralProberCount);
 }
 
 }

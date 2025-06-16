@@ -48,10 +48,42 @@ struct wpsFingerprint {
 
 struct MgmtInfo {
   String ssid;
+  String countryCode;
   String asciiHints;  // from unknown ASCII-looking IEs
   std::set<String> seenSsids;
   wpsFingerprint wps;
   
+};
+
+struct datFrameInfo {
+
+  uint32_t qosUpCount = 0, qosDownCount = 0;
+  uint64_t qosLenUpSum = 0, qosLenUpSqSum = 0;
+  uint64_t qosLenDownSum = 0, qosLenDownSqSum = 0;
+  uint32_t tidUpSum = 0, tidUpSqSum = 0;
+  uint32_t tidDownSum = 0, tidDownSqSum = 0;
+  uint32_t amsduUpSum = 0, amsduDownSum = 0;
+  uint32_t eospUpSum = 0, eospDownSum = 0;
+  uint32_t encryptedUpCount = 0, encryptedDownCount = 0;
+
+  std::set<String> dnsHostnames;
+  std::set<uint16_t> udpPorts;
+  std::set<uint16_t> tcpPorts;
+  std::set<String> ipv4Addrs;
+  std::set<String> icmpv6Types;
+  std::set<uint16_t> etherTypes;
+  std::map<String, uint32_t> etherTypeSummaryCounts;
+  std::map<String, uint32_t> ipv6Flows;  // key = "src → dst", value = count
+  std::map<String, uint64_t> ipv6FlowBytes;
+  std::map<String, uint32_t> ipv4Flows;
+  std::map<String, uint64_t> ipv4FlowBytes;             // flow key → byte count
+  std::map<String, uint64_t> ipv6FlowBytesSqSum;
+  std::map<String, uint64_t> ipv4FlowBytesSqSum;
+  
+  std::map<String, std::set<String>> dnsHostnamesByFlow;
+  // Key: "192.168.0.2 → 8.8.8.8"
+  // Value: { "example.com", "google.com" }
+
 };
 
 struct DeviceCapture {
@@ -89,33 +121,15 @@ struct MacStats {
   uint64_t lenSqSum = 0;
   std::set<String> destMacs;
   std::map<FrameStatKey, uint32_t> frameCombos;
-  std::set<uint16_t> etherTypes;
   std::set<String> rxMacSummaries;  // E.g., "44:65:0D(Unicast)", "33:33:00(IPv6)"
   std::set<String> bssidSummaries;
-  uint32_t qosUpCount = 0, qosDownCount = 0;
-  uint64_t qosLenUpSum = 0, qosLenUpSqSum = 0;
-  uint64_t qosLenDownSum = 0, qosLenDownSqSum = 0;
-  uint32_t tidUpSum = 0, tidUpSqSum = 0;
-  uint32_t tidDownSum = 0, tidDownSqSum = 0;
-  uint32_t amsduUpSum = 0, amsduDownSum = 0;
-  uint32_t eospUpSum = 0, eospDownSum = 0;
-  uint32_t encryptedUpCount = 0, encryptedDownCount = 0;
-
-  uint32_t dnsCount = 0;
-  uint32_t mdnsCount = 0;
-  std::set<String> dnsHostnames;
-
-  std::set<uint16_t> udpPorts;
-  std::set<uint16_t> tcpPorts;
-  std::set<String> ipv4Addrs;
-  std::set<String> ipv6Addrs;
-  std::set<String> icmpv6Types;
-
   std::set<String> asciiStrings;
   
   //Mgmt frame parsing
   //wpsFingerprint wps;
   MgmtInfo mgmt;
+  //Data frame parsing
+  datFrameInfo df;
 };
 
 extern std::map<String, MacStats> macStatsMap;
@@ -218,6 +232,8 @@ const VendorOUI vendorTable[] = {
   {{0xFC, 0x15, 0xB4}, "LGInno"}, //Hewlett Packard
   {{0xE4, 0x7D, 0xEB}, "ShanIT"}, //Shanghai Notion Information Technology CO.,LTD.
   {{0xAC, 0xC3, 0x58}, "CzAuto"}, //Continental Automotive Czech Republic s.r.o.
+  //EC:6C:9A Arcadyan Corporation
+
 };
 
 const size_t vendorCount = sizeof(vendorTable) / sizeof(vendorTable[0]);

@@ -81,8 +81,10 @@ void sniffer_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
   updateMacStatsFromGlobalItems(cap);
   // Type 2 frames (QoS and non-QoS data frames)
   if(isDataFrame){ 
+    Serial.printf("[FRAME] type: %02X, subtype: %02X, dir: %s\n", cap.frameType, cap.subtype, cap.directionText);
+    Serial.println("Sender MAC: " + cap.senderMac);
+    hexDump(ppkt->payload, ppkt->rx_ctrl.sig_len);
     parseDataFrame(ppkt->payload, ppkt->rx_ctrl.sig_len, cap);
-    //debugPrintMacStats(cap.srcMac);
   }
   //-------------------------------------------------------------
   //Type 0 frames (management frames)
@@ -118,22 +120,33 @@ void sniffer_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
     const uint8_t* ieData = ppkt->payload + offset;
     // [DEBUG]--------------
     if(cap.subtype == 0x04){
-    Serial.println("\n=== Data Frame Raw Frame Hex Dump ===");
-    Serial.printf("[FRAME] type: %02X, subtype: %02X, dir: %s\n", cap.frameType, cap.subtype, cap.directionText);
-    Serial.println("Sender MAC: " + cap.senderMac);
-    Serial.printf("[DEBUG] sig_len=%d, offset=%d, ieLen=%d\n", ppkt->rx_ctrl.sig_len, offset, ieLen);
-    printIEsDebug(ieData, ieLen);
-    hexDump(ppkt->payload, ppkt->rx_ctrl.sig_len);
-    String ssid = extractSsid(ieData, ieLen);
-    if (ssid.length()) {
-      cap.mgmtInfo.ssid = ssid;
-      Serial.println("📶 [SSID] Extracted (extractSsid): \"" + ssid + "\"");
-    }
+    //Serial.println("\n=== Data Frame Raw Frame Hex Dump ===");
+    //Serial.printf("[FRAME] type: %02X, subtype: %02X, dir: %s\n", cap.frameType, cap.subtype, cap.directionText);
+    //Serial.println("Sender MAC: " + cap.senderMac);
+    //Serial.printf("[DEBUG] sig_len=%d, offset=%d, ieLen=%d\n", ppkt->rx_ctrl.sig_len, offset, ieLen);
+    //printIEsDebug(ieData, ieLen);
+    //hexDump(ppkt->payload, ppkt->rx_ctrl.sig_len);
+  //String ssid = extractSsid(ieData, ieLen);
+    //if (ssid.length()) {
+      //cap.mgmtInfo.ssid = ssid;
+      //Serial.println("📶 [SSID] Extracted (extractSsid): \"" + ssid + "\"");
+    //}
       //Serial.printf("[DEBUG] Frame Ctrl: 0x%04X | Type: %u | Subtype: 0x%02X\n", fctl, type, subtype);
       //parseDataFrame(frame, ppkt->rx_ctrl.sig_len);
     }
     //----------------------
     // Parse Information Elements
+    String ssid = extractSsid(ieData, ieLen);
+    if (ssid.length()) {
+      cap.mgmtInfo.ssid = ssid;
+      Serial.println("📶 [SSID] Extracted (extractSsid): \"" + ssid + "\"");
+      addSsidToStats(macStatsMap[cap.senderMac], ssid);
+      Serial.println("[🧪] SSIDs currently stored for " + cap.senderMac + ":");
+      for (const String& s : macStatsMap[cap.senderMac].mgmt.seenSsids) {
+      Serial.println("  • " + s);
+}
+
+    }
     parseMgmtFrame(ieData, ieLen, cap);
     // Merge extracted mgmtInfo into per-MAC stats
     MacStats& stats = macStatsMap[cap.senderMac];
