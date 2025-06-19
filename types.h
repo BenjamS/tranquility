@@ -13,6 +13,14 @@ enum FrameDirection : uint8_t {
   DIR_WDS
 };
 
+enum EapolMsgType {
+  EAPOL_MSG_UNKNOWN = 0,
+  EAPOL_MSG_1_4,
+  EAPOL_MSG_2_4,
+  EAPOL_MSG_3_4,
+  EAPOL_MSG_4_4
+};
+
 const char* directionToStr(FrameDirection dir);
 
 // ---------------- STRUCTS ----------------
@@ -55,6 +63,20 @@ struct MgmtInfo {
   
 };
 
+struct EapolHandshakeDetail {
+  bool anonceSeen = false;
+  bool snonceSeen = false;
+
+  uint8_t anonce[32];
+  uint8_t snonce[32];
+
+  uint8_t apMac[6];
+  uint8_t clientMac[6];
+
+  String ssid;               // Optional: for WPA2-PSK decryption
+  uint64_t replayCounter = 0;
+};
+
 struct datFrameInfo {
 
   uint32_t qosUpCount = 0, qosDownCount = 0;
@@ -84,7 +106,9 @@ struct datFrameInfo {
   // Key: "192.168.0.2 → 8.8.8.8"
   // Value: { "example.com", "google.com" }
   std::set<uint32_t> targetMacSuffixes;  // Lower 24-bit MAC suffixes seen as targets (EUI-64 deduction)
-
+  // EAPOL
+  EapolHandshakeDetail handshake;
+  uint16_t eapolHandshakeCounts[5] = {0};
 };
 
 struct DeviceCapture {
