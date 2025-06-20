@@ -83,7 +83,7 @@ void sniffer_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
   if(isDataFrame){ 
     Serial.printf("[FRAME] type: %02X, subtype: %02X, dir: %s\n", cap.frameType, cap.subtype, cap.directionText);
     Serial.println("Sender MAC: " + cap.senderMac);
-    hexDump(ppkt->payload, ppkt->rx_ctrl.sig_len);
+    //hexDump(ppkt->payload, ppkt->rx_ctrl.sig_len);
     parseDataFrame(ppkt->payload, ppkt->rx_ctrl.sig_len, cap);
   }
   //-------------------------------------------------------------

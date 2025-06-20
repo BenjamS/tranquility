@@ -16,6 +16,22 @@ std::map<FrameStatKey, int> globalFrameStats;
 //=============================================================
 // Helpers
 //=============================================================
+void formatIPv6Short(const uint8_t* addr, char* buf, size_t bufLen) {
+  snprintf(buf, bufLen,
+    "%x:%x:%x:%x:%x:%x:%x:%x",
+    (addr[0] << 8) | addr[1], (addr[2] << 8) | addr[3],
+    (addr[4] << 8) | addr[5], (addr[6] << 8) | addr[7],
+    (addr[8] << 8) | addr[9], (addr[10] << 8) | addr[11],
+    (addr[12] << 8) | addr[13], (addr[14] << 8) | addr[15]);
+}
+
+void formatIPv6Compact(const uint8_t* ip, char* out, size_t outSize = 48) {
+  snprintf(out, outSize,
+           "%02X%02X:%02X%02X:%02X%02X:%02X%02X:%02X%02X:%02X%02X:%02X%02X:%02X%02X",
+           ip[0], ip[1], ip[2], ip[3], ip[4], ip[5], ip[6], ip[7],
+           ip[8], ip[9], ip[10], ip[11], ip[12], ip[13], ip[14], ip[15]);
+}
+
 void ipToString(const uint8_t* ip, char* buf, size_t bufLen) {
   snprintf(buf, bufLen, "%u.%u.%u.%u", ip[0], ip[1], ip[2], ip[3]);
 }
@@ -814,6 +830,43 @@ void parseDataFrame(const uint8_t* frame, uint16_t len, const DeviceCapture& cap
   if (isQoS) macHeaderLen += 2;
   if (len < macHeaderLen + 8) return;
 
+  if (isQoS) {
+    const uint8_t* qosCtrl = frame + macHeaderLen - 2;
+    uint8_t qos1 = qosCtrl[0];
+    uint8_t tid = qos1 & 0x0F;
+    bool eosp = qos1 & 0x10;
+    bool amsdu = qos1 & 0x20;
+
+    if (cap.directionCode == DIR_CLIENT_TO_AP) {
+      stats.df.qosUpCount++;
+      stats.df.tidUpSum += tid;
+      stats.df.tidUpSqSum += tid * tid;
+      stats.df.amsduUpSum += amsdu;
+      stats.df.eospUpSum += eosp;
+      stats.df.qosLenUpSum += cap.length;
+      stats.df.qosLenUpSqSum += cap.length * cap.length;
+      if (isEncrypted) stats.df.encryptedUpCount++;
+    } else if (cap.directionCode == DIR_AP_TO_CLIENT) {
+      stats.df.qosDownCount++;
+      stats.df.tidDownSum += tid;
+      stats.df.tidDownSqSum += tid * tid;
+      stats.df.amsduDownSum += amsdu;
+      stats.df.eospDownSum += eosp;
+      stats.df.qosLenDownSum += cap.length;
+      stats.df.qosLenDownSqSum += cap.length * cap.length;
+      if (isEncrypted) stats.df.encryptedDownCount++;
+    }
+
+    Serial.printf("🎯 QoS Control: TID = %u | A-MSDU = %s | EOSP = %s%s\n",
+      tid, amsdu ? "Yes" : "No", eosp ? "Yes" : "No",
+      isEncrypted ? " | 🔐 Encrypted" : "");
+
+    if (tid >= 4 && tid < 6) Serial.println("🟡 Possibly video (TID 4-5)");
+    else if (tid >= 6 && tid < 8) Serial.println("🚨 High-priority traffic (TID 6-7)");
+  }
+
+  if (isEncrypted) return;
+
   const uint8_t* llc = frame + macHeaderLen;
   if (llc[0] != 0xAA || llc[1] != 0xAA || llc[2] != 0x03) return;
 
@@ -824,60 +877,70 @@ void parseDataFrame(const uint8_t* frame, uint16_t len, const DeviceCapture& cap
 
   stats.df.etherTypes.insert(etherType);
 
-// --------------------- EAPOL ---------------------
-if (etherType == 0x888E && payloadLen >= 100) {
-  uint8_t type = payload[1];
-  if (type == 3) { // EAPOL-Key frame
-    uint16_t keyInfo = (payload[4] << 8) | payload[5];
-    bool mic = keyInfo & (1 << 8);
-    bool ack = keyInfo & (1 << 7);
-    bool install = keyInfo & (1 << 6);
-    bool pairwise = keyInfo & (1 << 3);
-
-    Serial.printf("🔐 EAPOL Key Frame | MIC:%d | ACK:%d | Install:%d | Pairwise:%d\n", mic, ack, install, pairwise);
-
-    EapolMsgType msgType = EAPOL_MSG_UNKNOWN;
-    if (!mic && ack) msgType = EAPOL_MSG_1_4;
-    else if (mic && ack && !install) msgType = EAPOL_MSG_2_4;
-    else if (mic && install && !ack) msgType = EAPOL_MSG_3_4;
-    else if (mic && !install && !ack) msgType = EAPOL_MSG_4_4;
-
-    const char* msgLabel[] = {"Unknown", "1/4", "2/4", "3/4", "4/4"};
-    Serial.printf("📡 WPA Handshake Detected: Msg %s\n", msgLabel[msgType]);
-
-    stats.df.eapolHandshakeCounts[msgType]++;
-
-    EapolHandshakeDetail& hs = stats.df.handshake;
-
-    if (msgType == EAPOL_MSG_1_4 && !hs.anonceSeen) {
-      memcpy(hs.anonce, payload + 17, 32);
-      memcpy(hs.apMac, cap.senderMac.c_str(), 6);
-      hs.anonceSeen = true;
-      Serial.println("🧬 ANonce saved");
-    }
-    else if (msgType == EAPOL_MSG_2_4 && !hs.snonceSeen) {
-      memcpy(hs.snonce, payload + 17, 32);
-      memcpy(hs.clientMac, cap.senderMac.c_str(), 6);
-
-      // Extract 64-bit Replay Counter from offset 9
-      hs.replayCounter =
-        ((uint64_t)payload[9]  << 56) | ((uint64_t)payload[10] << 48) |
-        ((uint64_t)payload[11] << 40) | ((uint64_t)payload[12] << 32) |
-        ((uint64_t)payload[13] << 24) | ((uint64_t)payload[14] << 16) |
-        ((uint64_t)payload[15] << 8)  | ((uint64_t)payload[16]);
-
-      hs.snonceSeen = true;
-      Serial.println("🧬 SNonce + replay counter saved");
-    }
-
-    // Save SSID if available in mgmt stats
-    if (stats.mgmt.ssid.length() && hs.ssid.length() == 0) {
-      hs.ssid = stats.mgmt.ssid;
-      Serial.println("🔖 SSID saved: " + hs.ssid);
-    }
+  // -------- EtherType Summary --------
+  switch (etherType) {
+    case 0x0806: stats.df.etherTypeSummaryCounts["ARP"]++; break;
+    case 0x888E: stats.df.etherTypeSummaryCounts["EAPOL"]++; break;
+    case 0x8100: stats.df.etherTypeSummaryCounts["802.1Q VLAN"]++; break;
+    case 0x8847: stats.df.etherTypeSummaryCounts["MPLS"]++; break;
+    case 0x8864: stats.df.etherTypeSummaryCounts["PPP-over-E"]++; break;
+    case 0x88CC: stats.df.etherTypeSummaryCounts["LLDP"]++; break;
+    default:
+      if (etherType != 0x0800 && etherType != 0x86DD) {
+        char label[16];
+        snprintf(label, sizeof(label), "0x%04X", etherType);
+        stats.df.etherTypeSummaryCounts[label]++;
+      }
+      break;
   }
-  return;
-}
+
+  // --------------------- EAPOL ---------------------
+  if (etherType == 0x888E && payloadLen >= 100) {
+    uint8_t type = payload[1];
+    if (type == 3) {
+      uint16_t keyInfo = (payload[4] << 8) | payload[5];
+      bool mic = keyInfo & (1 << 8);
+      bool ack = keyInfo & (1 << 7);
+      bool install = keyInfo & (1 << 6);
+      bool pairwise = keyInfo & (1 << 3);
+
+      Serial.printf("🔐 EAPOL Key Frame | MIC:%d | ACK:%d | Install:%d | Pairwise:%d\n", mic, ack, install, pairwise);
+
+      EapolMsgType msgType = EAPOL_MSG_UNKNOWN;
+      if (!mic && ack) msgType = EAPOL_MSG_1_4;
+      else if (mic && ack && !install) msgType = EAPOL_MSG_2_4;
+      else if (mic && install && !ack) msgType = EAPOL_MSG_3_4;
+      else if (mic && !install && !ack) msgType = EAPOL_MSG_4_4;
+
+      const char* msgLabel[] = {"Unknown", "1/4", "2/4", "3/4", "4/4"};
+      Serial.printf("📡 WPA Handshake Detected: Msg %s\n", msgLabel[msgType]);
+
+      stats.df.eapolHandshakeCounts[msgType]++;
+      EapolHandshakeDetail& hs = stats.df.handshake;
+
+      if (msgType == EAPOL_MSG_1_4 && !hs.anonceSeen) {
+        memcpy(hs.anonce, payload + 17, 32);
+        memcpy(hs.apMac, cap.senderMac.c_str(), 6);
+        hs.anonceSeen = true;
+        Serial.println("🧬 ANonce saved");
+      } else if (msgType == EAPOL_MSG_2_4 && !hs.snonceSeen) {
+        memcpy(hs.snonce, payload + 17, 32);
+        memcpy(hs.clientMac, cap.senderMac.c_str(), 6);
+        hs.replayCounter = ((uint64_t)payload[9] << 56) | ((uint64_t)payload[10] << 48) |
+                           ((uint64_t)payload[11] << 40) | ((uint64_t)payload[12] << 32) |
+                           ((uint64_t)payload[13] << 24) | ((uint64_t)payload[14] << 16) |
+                           ((uint64_t)payload[15] << 8)  | ((uint64_t)payload[16]);
+        hs.snonceSeen = true;
+        Serial.println("🧬 SNonce + replay counter saved");
+      }
+
+      if (stats.mgmt.ssid.length() && hs.ssid.length() == 0) {
+        hs.ssid = stats.mgmt.ssid;
+        Serial.println("🔖 SSID saved: " + hs.ssid);
+      }
+    }
+    return;
+  }
 
   // --------------------- IPv4 ---------------------
 if (etherType == 0x0800 && payloadLen >= 20) {
@@ -885,96 +948,306 @@ if (etherType == 0x0800 && payloadLen >= 20) {
   uint8_t ihl = (ip[0] & 0x0F) * 4;
   uint8_t protocol = ip[9];
 
-  char srcIp[16], dstIp[16];
+  char srcIp[16], dstIp[16], flowKey[64];
   ipToString(ip + 12, srcIp, sizeof(srcIp));
   ipToString(ip + 16, dstIp, sizeof(dstIp));
-
-  char flowKey[64];
-  snprintf(flowKey, sizeof(flowKey), "%s → %s", srcIp, dstIp);
-
+  const uint8_t* end = payload + payloadLen;
   const char* label = "IPv4/Other";
 
-  if (protocol == 0x11 && payloadLen >= ihl + 8) {  // UDP
+  // ---------- UDP ----------
+  if (protocol == 0x11 && payloadLen >= ihl + 8) {
+    label = "IPv4/UDP";
     const uint8_t* udp = ip + ihl;
     uint16_t srcPort = (udp[0] << 8) | udp[1];
     uint16_t dstPort = (udp[2] << 8) | udp[3];
     const uint8_t* dns = udp + 8;
 
-    if (dstPort == 53 || dstPort == 5353 || srcPort == 53 || srcPort == 5353) {
-      label = (dstPort == 5353 || srcPort == 5353) ? "IPv4/UDP/mDNS" : "IPv4/UDP/DNS";
-      const uint8_t* base = dns;
-      const uint8_t* end = payload + payloadLen;
-      uint16_t qdCount = (dns[4] << 8) | dns[5];
-      uint16_t anCount = (dns[6] << 8) | dns[7];
-      const uint8_t* ptr = dns + 12;
+    // DHCP Hostname
+    if ((srcPort == 68 && dstPort == 67) && dns + 240 < end) {
+      const uint8_t* options = dns + 240;
+      while (options + 1 < end && options[0] != 255) {
+        uint8_t code = options[0], len = options[1];
+        if (options + 2 + len > end) break;
 
-      // Skip Questions
-      for (int i = 0; i < qdCount && ptr < end; ++i) {
-        char temp[128];
-        decodeDnsName(base, ptr, end, temp, sizeof(temp));
-        while (*ptr && ptr < end) ++ptr;
-        ptr += 4;
-      }
-
-      // Parse Answers
-      for (int i = 0; i < anCount && ptr + 10 < end; ++i) {
-        char name[128];
-        decodeDnsName(base, ptr, end, name, sizeof(name));
-        ptr += 2;
-        uint16_t type = (ptr[0] << 8) | ptr[1];
-        uint16_t dataLen = (ptr[8] << 8) | ptr[9];
-        ptr += 10;
-
-        if (type == 1 && dataLen == 4) {  // A Record
-          char ipStr[16];
-          ipToString(ptr, ipStr, sizeof(ipStr));
-          Serial.printf("📥 A Record: %s → %s\n", name, ipStr);
-        } else if (type == 12) { // PTR
-          char ptrName[128];
-          decodeDnsName(base, ptr, end, ptrName, sizeof(ptrName));
-          Serial.printf("🔁 PTR Record: %s → %s\n", name, ptrName);
-        } else if (type == 16) {
-          Serial.printf("📝 TXT Record: %s\n", name);
+        if (code == 12 && len < 64) {
+          char host[65] = {0};
+          memcpy(host, options + 2, len);
+          String taggedHost = "DHCP:" + String(host);  // Replace "SOURCE"
+          stats.df.dnsHostnames.insert(taggedHost);
+          stats.df.dnsHostnamesByFlow[flowKey].insert(taggedHost);
+          //stats.df.dnsHostnames.insert(host);
+          //stats.df.dnsHostnamesByFlow[flowKey].insert(host);
+          Serial.printf("📛 DHCP Hostname: %s\n", host);
+          break;
         }
-        ptr += dataLen;
+        options += 2 + len;
       }
     }
+
+    // LLMNR Hostname
+    if (srcPort == 5355 || dstPort == 5355) {
+      const uint8_t* ptr = dns + 12;
+      char host[128] = {0};
+      size_t pos = 0;
+      while (ptr < end && *ptr && pos < sizeof(host) - 2) {
+        uint8_t len = *ptr++;
+        if (ptr + len > end) break;
+        for (uint8_t i = 0; i < len && pos < sizeof(host) - 2; ++i)
+          host[pos++] = (*ptr >= 32 && *ptr <= 126) ? *ptr++ : '.';
+        host[pos++] = '.';
+      }
+      host[pos] = '\0';
+      if (pos > 1) {
+        String taggedHost = "LLMR:" + String(host);  // Replace "SOURCE"
+        stats.df.dnsHostnames.insert(taggedHost);
+        stats.df.dnsHostnamesByFlow[flowKey].insert(taggedHost);
+        //stats.df.dnsHostnames.insert(host);
+        //stats.df.dnsHostnamesByFlow[flowKey].insert(host);
+        Serial.printf("🌐 LLMNR Hostname: %s\n", host);
+      }
+    }
+
+    // NetBIOS Name
+    if (dstPort == 137 || srcPort == 137) {
+      const uint8_t* ptr = dns + 12;
+      if (ptr + 1 < end && *ptr < 64) {
+        char name[32] = {0};
+        uint8_t len = *ptr++;
+        for (uint8_t i = 0; i < len && ptr < end && i < sizeof(name) - 1; ++i)
+          name[i] = (*ptr >= 32 && *ptr <= 126) ? *ptr++ : '.';
+        String taggedHost = "SOURCE: " + String(name);  // Replace "SOURCE"
+        stats.df.dnsHostnames.insert(taggedHost);
+        stats.df.dnsHostnamesByFlow[flowKey].insert(taggedHost);
+        //stats.df.dnsHostnames.insert(name);
+        //stats.df.dnsHostnamesByFlow[flowKey].insert(name);
+        Serial.printf("📡 NetBIOS Host: %s\n", name);
+      }
+    }
+
+    // DNS / mDNS Hostnames
+if (dstPort == 53 || dstPort == 5353 || srcPort == 53 || srcPort == 5353) {
+  bool isMdns = (dstPort == 5353 || srcPort == 5353);
+  label = isMdns ? "IPv4/UDP/mDNS" : "IPv4/UDP/DNS";
+  const uint8_t* base = dns;
+  uint16_t qdCount = (dns[4] << 8) | dns[5];
+  uint16_t anCount = (dns[6] << 8) | dns[7];
+  const uint8_t* ptr = dns + 12;
+
+  // Skip Questions
+  for (int i = 0; i < qdCount && ptr < end; ++i) {
+    char temp[128];
+    decodeDnsName(base, ptr, end, temp, sizeof(temp));
+    while (*ptr && ptr < end) ++ptr;
+    ptr += 4;
   }
 
-  Serial.printf("🧭 Flow: %s (%s)\n", flowKey, label);
+  // Parse Answers
+  for (int i = 0; i < anCount && ptr + 10 < end; ++i) {
+    char name[128];
+    decodeDnsName(base, ptr, end, name, sizeof(name));
+    ptr += 2;
+    uint16_t type = (ptr[0] << 8) | ptr[1];
+    uint16_t dataLen = (ptr[8] << 8) | ptr[9];
+    ptr += 10;
+
+    if (ptr + dataLen > end) break;
+
+    // 🌐 Log values
+    if (type == 1 && dataLen == 4) {  // A Record
+      char ipStr[16];
+      ipToString(ptr, ipStr, sizeof(ipStr));
+      Serial.printf("📥 A Record: %s → %s\n", name, ipStr);
+      stats.df.ipv4Addrs.insert(ipStr);  // ✅ Log IP
+    }
+    else if (type == 12) {  // PTR Record
+      char ptrName[128];
+      decodeDnsName(base, ptr, end, ptrName, sizeof(ptrName));
+      Serial.printf("🔁 PTR Record: %s → %s\n", name, ptrName);
+      String tagged = (isMdns ? "mDNS: " : "DNS: ") + String(ptrName);
+      stats.df.dnsHostnames.insert(tagged);
+      stats.df.dnsHostnamesByFlow[flowKey].insert(tagged);
+    }
+else if (type == 16) {  // TXT Record
+  Serial.printf("📝 TXT Record: %s\n", name);
+  String taggedBase = (isMdns ? "mDNS TXT: " : "DNS TXT: ") + String(name);
+
+  const uint8_t* txt = ptr;
+  const uint8_t* txtEnd = ptr + dataLen;
+
+  while (txt < txtEnd) {
+    uint8_t len = *txt++;
+    if (txt + len > txtEnd || len == 0) break;
+
+    char field[128] = {0};
+    memcpy(field, txt, len);
+    field[len] = '\0';
+
+    String taggedField = taggedBase + " → " + String(field);
+    stats.df.dnsHostnames.insert(taggedField);
+    stats.df.dnsHostnamesByFlow[flowKey].insert(taggedField);
+    Serial.printf("🔎 TXT Field: %s\n", field);
+
+    txt += len;
+  }
+}
+else if (type == 28 && dataLen == 16) {  // AAAA Record
+  char ip6Str[40];
+  formatIPv6Short(ptr, ip6Str, sizeof(ip6Str));  // you likely already have formatIPv6Short()
+  Serial.printf("🌐 AAAA Record: %s → %s\n", name, ip6Str);
+  stats.df.dnsHostnames.insert((isMdns ? "mDNS AAAA: " : "DNS AAAA: ") + String(name));
+  stats.df.ipv6Flows["AAAA: " + String(name) + " → " + ip6Str]++;
+}
+else if (type == 33 && dataLen >= 6) {  // SRV Record
+  uint16_t priority = (ptr[0] << 8) | ptr[1];
+  uint16_t weight   = (ptr[2] << 8) | ptr[3];
+  uint16_t port     = (ptr[4] << 8) | ptr[5];
+  const uint8_t* target = ptr + 6;
+
+  char targetName[128];
+  decodeDnsName(base, target, end, targetName, sizeof(targetName));
+
+  Serial.printf("🛰️ SRV Record: %s:%u (priority=%u weight=%u)\n",
+                targetName, port, priority, weight);
+
+  String label = String(isMdns ? "mDNS SRV: " : "DNS SRV: ") +
+                 String(name) + " → " + String(targetName) + ":" + port;
+  stats.df.dnsHostnames.insert(label);
+  stats.df.dnsHostnamesByFlow[flowKey].insert(label);
 }
 
-  // --------------------- IPv6 ---------------------
-  else if (etherType == 0x86DD && payloadLen >= 40) {
-    const uint8_t* ip6 = payload;
-    uint8_t nextHeader = ip6[6];
-    uint16_t offset = 40;
-
-    while ((nextHeader == 0 || nextHeader == 43 || nextHeader == 60 || nextHeader == 51 || nextHeader == 50) &&
-           offset + 8 < payloadLen) {
-      nextHeader = payload[offset];
-      uint8_t extLen = payload[offset + 1];
-      offset += 8 + extLen * 8;
-    }
-
-    String srcIp = formatIPv6(ip6 + 8);
-    String dstIp = formatIPv6(ip6 + 24);
-    String label = "IPv6/Other";
-
-    if (nextHeader == 58) {
-      label = "IPv6/ICMPv6";
-    } else if (nextHeader == 6) {
-      label = "IPv6/TCP";
-    } else if (nextHeader == 17) {
-      label = "IPv6/UDP";
-    }
-
-    String flowKey = srcIp + " → " + dstIp + " (" + label + ")";
-    stats.df.ipv6Flows[flowKey]++;
-    stats.df.ipv6FlowBytes[flowKey] += payloadLen;
-    stats.df.ipv6FlowBytesSqSum[flowKey] += (uint64_t)payloadLen * payloadLen;
-    Serial.printf("🧭 IPv6 Flow: %s | +%u bytes\n", flowKey.c_str(), payloadLen);
+    ptr += dataLen;
   }
+}
+
+  }
+
+  // ---------- TCP ----------
+  else if (protocol == 0x06 && payloadLen >= ihl + 20) {
+    label = "IPv4/TCP";
+    const uint8_t* tcp = ip + ihl;
+    uint16_t srcPort = (tcp[0] << 8) | tcp[1];
+    uint16_t dstPort = (tcp[2] << 8) | tcp[3];
+    uint8_t flags = tcp[13];
+
+    stats.df.tcpPorts.insert(srcPort);
+    stats.df.tcpPorts.insert(dstPort);
+
+    Serial.printf("TCP: %u → %u | Flags:", srcPort, dstPort);
+    if (flags & 0x02) Serial.print(" SYN");
+    if (flags & 0x10) Serial.print(" ACK");
+    if (flags & 0x01) Serial.print(" FIN");
+    Serial.println();
+  }
+
+  // ---------- Flow Tracking ----------
+  snprintf(flowKey, sizeof(flowKey), "%s → %s (%s)", srcIp, dstIp, label);
+  stats.df.ipv4Flows[flowKey]++;
+  stats.df.ipv4FlowBytes[flowKey] += payloadLen;
+  stats.df.ipv4FlowBytesSqSum[flowKey] += static_cast<uint64_t>(payloadLen) * payloadLen;
+  stats.df.etherTypeSummaryCounts[label]++;
+  Serial.printf("🧭 IPv4 Flow: %s | +%u bytes\n", flowKey, payloadLen);
+}
+
+  // --------------------- IPv6 (Optimized) ---------------------
+else if (etherType == 0x86DD && payloadLen >= 40) {
+  const uint8_t* ip6 = payload;
+  uint8_t nextHeader = ip6[6];
+  uint16_t offset = 40;
+
+  // Handle IPv6 extension headers
+  while ((nextHeader == 0 || nextHeader == 43 || nextHeader == 60 || nextHeader == 51 || nextHeader == 50) &&
+         offset + 8 < payloadLen) {
+    nextHeader = payload[offset];
+    uint8_t extLen = payload[offset + 1];
+    offset += 8 + extLen * 8;
+  }
+
+  char srcIp[48], dstIp[48], flowKey[128], label[32] = "IPv6/Other";
+  formatIPv6Compact(ip6 + 8, srcIp);
+  formatIPv6Compact(ip6 + 24, dstIp);
+
+  // --- ICMPv6 ---
+  if (nextHeader == 58 && payloadLen >= offset + 4) {
+    const uint8_t* icmp6 = payload + offset;
+    uint8_t type = icmp6[0];
+
+    if (type == 133) strcpy(label, "IPv6/ICMPv6/RS");
+    else if (type == 134) strcpy(label, "IPv6/ICMPv6/RA");
+    else if (type == 135) strcpy(label, "IPv6/ICMPv6/NS");
+    else if (type == 136) strcpy(label, "IPv6/ICMPv6/NA");
+    else strcpy(label, "IPv6/ICMPv6/Other");
+
+    stats.df.icmpv6Types.insert(label);
+  }
+
+  // --- TCP ---
+  else if (nextHeader == 6 && payloadLen >= offset + 20) {
+    const uint8_t* tcp = payload + offset;
+    uint16_t srcPort = (tcp[0] << 8) | tcp[1];
+    uint16_t dstPort = (tcp[2] << 8) | tcp[3];
+    uint8_t flags = tcp[13];
+
+    stats.df.tcpPorts.insert(srcPort);
+    stats.df.tcpPorts.insert(dstPort);
+    strcpy(label, "IPv6/TCP");
+
+    Serial.printf("TCP: %u → %u | Flags:", srcPort, dstPort);
+    if (flags & 0x02) Serial.print(" SYN");
+    if (flags & 0x10) Serial.print(" ACK");
+    if (flags & 0x01) Serial.print(" FIN");
+    Serial.println();
+  }
+
+  // --- UDP ---
+else if (nextHeader == 17 && payloadLen >= offset + 8) {
+  const uint8_t* udp = payload + offset;
+  uint16_t srcPort = (udp[0] << 8) | udp[1];
+  uint16_t dstPort = (udp[2] << 8) | udp[3];
+
+  stats.df.udpPorts.insert(srcPort);
+  stats.df.udpPorts.insert(dstPort);
+  strcpy(label, "IPv6/UDP");
+
+  Serial.printf("UDP: %u → %u\n", srcPort, dstPort);
+
+  // -------- DNS/mDNS Hostname Extraction --------
+  const uint8_t* dns = udp + 8;
+  const uint8_t* end = payload + payloadLen;
+
+  if (dstPort == 5353 || srcPort == 5353) {
+    stats.df.etherTypeSummaryCounts["IPv6/UDP/mDNS"]++;
+
+    const uint8_t* ptr = dns + 12;
+    char host[128] = {0};
+    size_t hostPos = 0;
+
+    while (ptr < end && *ptr && hostPos < sizeof(host) - 2) {
+      uint8_t len = *ptr++;
+      if (ptr + len > end) break;
+      for (uint8_t i = 0; i < len && hostPos < sizeof(host) - 2; ++i) {
+        char c = *ptr++;
+        host[hostPos++] = (c >= 32 && c <= 126) ? c : '.';
+      }
+      host[hostPos++] = '.';
+    }
+    host[hostPos] = '\0';
+
+    if (hostPos > 1) {
+      stats.df.dnsHostnames.insert(host);
+      stats.df.dnsHostnamesByFlow[flowKey].insert(host);
+      Serial.printf("🔍 mDNS Query (IPv6): %s\n", host);
+    }
+  }
+}
+
+  snprintf(flowKey, sizeof(flowKey), "%s → %s (%s)", srcIp, dstIp, label);
+  stats.df.ipv6Flows[flowKey]++;
+  stats.df.ipv6FlowBytes[flowKey] += payloadLen;
+  stats.df.ipv6FlowBytesSqSum[flowKey] += static_cast<uint64_t>(payloadLen) * payloadLen;
+  stats.df.etherTypeSummaryCounts[label]++;
+  Serial.printf("🧭 IPv6 Flow: %s | +%u bytes\n", flowKey, payloadLen);
+}
+
 }
 
 
