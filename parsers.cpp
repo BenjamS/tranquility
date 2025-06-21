@@ -72,6 +72,24 @@ bool isLikelyEui64(const uint8_t* addr) {
 }
 
 String extractMacFromEUI64(const uint8_t* addr) {
+  // Extracts MAC from IPv6 EUI-64: |prefix|FFFE|suffix|
+  // Reverses the U/L bit flip in the first byte
+
+  char mac[18];
+  snprintf(mac, sizeof(mac),
+           "%02X:%02X:%02X:%02X:%02X:%02X",
+           addr[8] ^ 0x02,  // Flip U/L bit
+           addr[9],
+           addr[10],
+           addr[13],
+           addr[14],
+           addr[15]);
+
+  return String(mac);
+}
+
+/*
+String extractMacFromEUI64(const uint8_t* addr) {
   uint8_t mac[6];
   mac[0] = addr[8] ^ 0x02; // Flip the U/L bit
   mac[1] = addr[9];
@@ -86,7 +104,249 @@ String extractMacFromEUI64(const uint8_t* addr) {
 
   return String(macStr);
 }
+*/
 
+void printFlowSummary(
+  const std::map<String, uint32_t>& flowCounts,
+  const std::map<String, uint64_t>& flowBytes,
+  const std::map<String, uint64_t>& flowBytesSq,
+  const std::map<String, std::set<String>>& dnsHostnamesByFlow,
+  const std::set<String>& knownMacs,
+  const std::set<String>& eui64Macs,
+  const char* label,
+  size_t maxToShow
+) {
+  if (flowCounts.empty()) {
+    Serial.printf("[DEBUG] No flows for: %s\n", label);
+    return;
+  }
+
+  Serial.printf("📶 %s:\n", label);
+
+  // Build MAC suffix → full MAC map
+  std::map<uint32_t, String> macSuffixMap;
+  for (const String& mac : knownMacs) {
+    int lastColon = mac.lastIndexOf(':');
+    int midColon = mac.lastIndexOf(':', lastColon - 1);
+    int preColon = mac.lastIndexOf(':', midColon - 1);
+    if (preColon >= 0 && midColon > preColon && lastColon > midColon) {
+      uint8_t b1 = strtoul(mac.substring(preColon + 1, midColon).c_str(), nullptr, 16);
+      uint8_t b2 = strtoul(mac.substring(midColon + 1, lastColon).c_str(), nullptr, 16);
+      uint8_t b3 = strtoul(mac.substring(lastColon + 1).c_str(), nullptr, 16);
+      uint32_t suffix = (b1 << 16) | (b2 << 8) | b3;
+      macSuffixMap[suffix] = mac;
+    }
+  }
+
+  // Sort flows by packet count
+  std::vector<std::pair<String, uint32_t>> sorted(flowCounts.begin(), flowCounts.end());
+  std::sort(sorted.begin(), sorted.end(), [](const std::pair<String, uint32_t>& a, const std::pair<String, uint32_t>& b) {
+  return a.second > b.second;
+});
+
+  size_t shown = 0;
+  for (auto& pair : sorted) {
+    String flow = pair.first;
+    uint32_t count = pair.second;
+    uint64_t totalBytes = flowBytes.count(flow) ? flowBytes.at(flow) : 0;
+    uint64_t totalSq    = flowBytesSq.count(flow) ? flowBytesSq.at(flow) : 0;
+
+    float mean = count > 0 ? (float)totalBytes / count : 0.0;
+    float variance = 0.0;
+    if (count > 1) {
+      double avg = static_cast<double>(totalBytes) / count;
+      double avgSq = static_cast<double>(totalSq) / count;
+      variance = static_cast<float>(avgSq - avg * avg);
+      if (variance < 0) variance = 0;
+    }
+    float stddev = sqrt(variance);
+
+    // Inline hostname if present
+    String extraInfo;
+    auto hostIt = dnsHostnamesByFlow.find(flow);
+    if (hostIt != dnsHostnamesByFlow.end() && !hostIt->second.empty()) {
+      extraInfo = " 🔍 " + *hostIt->second.begin();
+    }
+
+    // 🧬 EUI-64 Source Match
+    for (const String& euiMac : eui64Macs) {
+      if (flow.indexOf(euiMac) != -1) {
+        extraInfo += " 🧬 EUI64=" + euiMac;
+        break;
+      }
+    }
+
+    // 🎯 Solicited-node target MAC suffix match
+    if (flow.startsWith("FE80") || flow.startsWith("FF02") || flow.startsWith("2001")) {
+      int arrow = flow.indexOf(" → ");
+      int paren = flow.indexOf(" (", arrow);
+      if (arrow > 0 && paren > arrow) {
+        String dst = flow.substring(arrow + 3, paren);
+        if (dst.startsWith("FF02::1:FF")) {
+          int lastColon = dst.lastIndexOf(':');
+          int midColon = dst.lastIndexOf(':', lastColon - 1);
+          int preColon = dst.lastIndexOf(':', midColon - 1);
+          if (preColon >= 0 && midColon > preColon && lastColon > midColon) {
+            uint8_t b1 = strtoul(dst.substring(preColon + 1, midColon).c_str(), nullptr, 16);
+            uint8_t b2 = strtoul(dst.substring(midColon + 1, lastColon).c_str(), nullptr, 16);
+            uint8_t b3 = strtoul(dst.substring(lastColon + 1).c_str(), nullptr, 16);
+            uint32_t suffix = (b1 << 16) | (b2 << 8) | b3;
+
+            auto it = macSuffixMap.find(suffix);
+            String targetTag;
+            if (it != macSuffixMap.end()) {
+              targetTag = " 🎯 Target=" + it->second;
+            } else {
+              char unknownMac[16];
+              snprintf(unknownMac, sizeof(unknownMac), "?? ?? ?? %02X:%02X:%02X", b1, b2, b3);
+              targetTag = " 🎯 Target=" + String(unknownMac);
+            }
+            extraInfo += targetTag;
+          }
+        }
+      }
+    }
+
+    // Print flow
+    if (shown++ < maxToShow) {
+      Serial.printf("  %s : %u pkts, Bytes: %.1f ± %.1f%s\n",
+                    flow.c_str(), count, mean, stddev, extraInfo.c_str());
+    }
+  }
+
+  if (sorted.size() > maxToShow) {
+    Serial.printf("  + %zu more flows not shown\n", sorted.size() - maxToShow);
+  }
+}
+/*
+void printFlowSummary(
+  const std::map<String, uint32_t>& flowCounts,
+  const std::map<String, uint64_t>& flowBytes,
+  const std::map<String, uint64_t>& flowBytesSq,
+  const std::map<String, std::set<String>>& dnsHostnamesByFlow,
+  const std::set<String>& knownMacs,
+  const char* label,
+  size_t maxToShow
+) {
+  if (flowCounts.empty()) return;
+
+  Serial.printf("📶 %s:\n", label);
+
+  // Build MAC suffix → full MAC map
+  std::map<uint32_t, String> macSuffixMap;
+  auto insertSuffixes = [&](const std::set<String>& macSet) {
+    for (const String& mac : macSet) {
+      int lastColon = mac.lastIndexOf(':');
+      int midColon = mac.lastIndexOf(':', lastColon - 1);
+      int preColon = mac.lastIndexOf(':', midColon - 1);
+      if (preColon >= 0 && midColon > preColon && lastColon > midColon) {
+        uint8_t b1 = strtoul(mac.substring(preColon + 1, midColon).c_str(), nullptr, 16);
+        uint8_t b2 = strtoul(mac.substring(midColon + 1, lastColon).c_str(), nullptr, 16);
+        uint8_t b3 = strtoul(mac.substring(lastColon + 1).c_str(), nullptr, 16);
+        uint32_t suffix = (b1 << 16) | (b2 << 8) | b3;
+        macSuffixMap[suffix] = mac;
+      }
+    }
+  };
+  insertSuffixes(knownMacs);
+
+  // Sort flow entries by count descending
+  std::vector<std::pair<String, uint32_t>> sorted(flowCounts.begin(), flowCounts.end());
+  std::sort(sorted.begin(), sorted.end(),
+            [](const std::pair<String, uint32_t>& a, const std::pair<String, uint32_t>& b) {
+              return a.second > b.second;
+            });
+
+  size_t shown = 0;
+
+  for (const auto& pair : sorted) {
+    String flow = pair.first;
+    uint32_t count = pair.second;
+    uint64_t totalBytes = flowBytes.count(flow) ? flowBytes.at(flow) : 0;
+    uint64_t totalSq = flowBytesSq.count(flow) ? flowBytesSq.at(flow) : 0;
+
+    float mean = (count > 0) ? ((float)totalBytes / count) : 0.0;
+    float variance = 0.0;
+    if (count > 1) {
+      double avg = static_cast<double>(totalBytes) / count;
+      double avgSq = static_cast<double>(totalSq) / count;
+      variance = static_cast<float>(avgSq - avg * avg);
+      if (variance < 0.0) variance = 0.0;
+    }
+    float stddev = sqrt(variance);
+
+    // IPv6 zero compression (basic)
+    flow.replace(":0000", "::");
+    flow.replace("0000:", "::");
+    while (flow.indexOf(":::") != -1) flow.replace(":::", "::");
+
+    // Attempt to match multicast suffix with known MAC
+    if (flow.startsWith("FE80") || flow.startsWith("FF02") || flow.startsWith("2001")) {
+      int arrow = flow.indexOf(" → ");
+      int paren = flow.indexOf(" (", arrow);
+      if (arrow > 0 && paren > arrow) {
+        String dst = flow.substring(arrow + 3, paren);
+        if (dst.startsWith("FF02::1:FF")) {
+          int lastColon = dst.lastIndexOf(':');
+          int midColon = dst.lastIndexOf(':', lastColon - 1);
+          int preColon = dst.lastIndexOf(':', midColon - 1);
+          if (preColon >= 0 && midColon > preColon && lastColon > midColon) {
+            uint8_t b1 = strtoul(dst.substring(preColon + 1, midColon).c_str(), nullptr, 16);
+            uint8_t b2 = strtoul(dst.substring(midColon + 1, lastColon).c_str(), nullptr, 16);
+            uint8_t b3 = strtoul(dst.substring(lastColon + 1).c_str(), nullptr, 16);
+            uint32_t suffix = (b1 << 16) | (b2 << 8) | b3;
+
+            auto it = macSuffixMap.find(suffix);
+            String targetTag;
+            if (it != macSuffixMap.end()) {
+              targetTag = " 🎯 Target MAC: " + it->second;
+            } else {
+              char unknownMac[16];
+              snprintf(unknownMac, sizeof(unknownMac), "%02X:%02X:%02X", b1, b2, b3);
+              targetTag = " 🎯 Target MAC suffix: " + String(unknownMac);
+            }
+
+            flow = flow.substring(0, paren) + targetTag + flow.substring(paren);
+          }
+        }
+      }
+    }
+
+    if (shown++ < maxToShow) {
+      String extraInfo;
+      auto hostIt = dnsHostnamesByFlow.find(flow);
+      if (hostIt != dnsHostnamesByFlow.end() && !hostIt->second.empty()) {
+        // Show up to 3 hostnames, grouped by source tag
+        std::map<String, std::vector<String>> tagGroups;
+        for (const String& h : hostIt->second) {
+          int split = h.indexOf(": ");
+          String tag = (split > 0) ? h.substring(0, split) : "";
+          String name = (split > 0) ? h.substring(split + 2) : h;
+          tagGroups[tag].push_back(name);
+        }
+
+        for (const auto& tg : tagGroups) {
+          const String& tag = tg.first;
+          const std::vector<String>& items = tg.second;
+          extraInfo += " 🔍 " + tag + ": ";
+          for (size_t i = 0; i < items.size() && i < 3; ++i) {
+            if (i > 0) extraInfo += ", ";
+            extraInfo += items[i];
+          }
+        }
+      }
+
+      Serial.printf("  %s : %u pkts, Bytes: %.1f ± %.1f%s\n",
+                    flow.c_str(), count, mean, stddev, extraInfo.c_str());
+    }
+  }
+
+  if (flowCounts.size() > maxToShow) {
+    Serial.printf("  + %zu more flows not shown\n", flowCounts.size() - maxToShow);
+  }
+}
+*/
+/*
 void printFlowSummary(
   const std::map<String, uint32_t>& flowCounts,
   const std::map<String, uint64_t>& flowBytes,
@@ -203,7 +463,6 @@ void printFlowSummary(
   }
 }
 
-/*
 void printFlowSummary(const std::map<String, uint32_t>& flowCounts,
                       const std::map<String, uint64_t>& flowBytes,
                       const std::map<String, uint64_t>& flowBytesSq,
@@ -282,51 +541,6 @@ void printFlowSummary(const std::map<String, uint32_t>& flowCounts,
   }
 }
 */
-/*
-void printFlowSummary(const std::map<String, uint32_t>& flowCounts,
-                      const std::map<String, uint64_t>& flowBytes,
-                      const std::map<String, uint64_t>& flowBytesSq,
-                      const char* label = "Flows",
-                      size_t maxToShow = 7) {
-  if (flowCounts.empty()) return;
-
-  Serial.printf("📶 %s:\n", label);
-
-  // Convert to vector for sorting
-  std::vector<std::pair<String, uint32_t>> sorted(flowCounts.begin(), flowCounts.end());
-
-  std::sort(sorted.begin(), sorted.end(),
-            [](const std::pair<String, uint32_t>& a, const std::pair<String, uint32_t>& b) {
-              return a.second > b.second;
-            });
-
-  size_t shown = 0;
-  uint32_t totalShown = 0;
-
-  for (const auto& pair : sorted) {
-    const String& flow = pair.first;
-    uint32_t count = pair.second;
-
-    if (shown++ < maxToShow) {
-      uint32_t totalBytes = flowBytes.count(flow) ? flowBytes.at(flow) : 0;
-      float mean = (count > 0) ? ((float)totalBytes / count) : 0.0;
-
-      // For now, assume no per-packet size tracking, so stdDev is zero
-      // You can later add stdDevBytes[flow] if needed
-      Serial.printf("  %s : %u pkts, %.1f B/packet\n", flow.c_str(), count, mean);
-
-      totalShown += count;
-    } else {
-      break;
-    }
-  }
-
-  if (flowCounts.size() > maxToShow) {
-    size_t remaining = flowCounts.size() - maxToShow;
-    Serial.printf("  + %zu more flows not shown\n", remaining);
-  }
-}
-*/
 
 String extractIPv6Prefix(const uint8_t* addr) {
   char prefix[40];
@@ -336,6 +550,52 @@ String extractIPv6Prefix(const uint8_t* addr) {
   return String(prefix);
 }
 
+String formatIPv6(const uint8_t* addr, bool annotate = true, std::set<uint32_t>* targetSuffixes = nullptr) {
+  char ipStr[40];  // Max IPv6 string = 39 + null
+  snprintf(ipStr, sizeof(ipStr),
+           "%02X%02X:%02X%02X:%02X%02X:%02X%02X:"
+           "%02X%02X:%02X%02X:%02X%02X:%02X%02X",
+           addr[0], addr[1], addr[2], addr[3],
+           addr[4], addr[5], addr[6], addr[7],
+           addr[8], addr[9], addr[10], addr[11],
+           addr[12], addr[13], addr[14], addr[15]);
+
+  String result(ipStr);
+
+  if (!annotate) return result;
+
+  // 📛 Label special address types
+  if (result.startsWith("FE80")) result += " 🔗 link-local";
+  else if (result.startsWith("FF02::1")) result += " 🔉 all-nodes";
+  else if (result.startsWith("FF02::2")) result += " 📣 all-routers";
+  else if (result.startsWith("2001:4860:4860::8888")) result += " 🌐 Google DNS";
+
+  // 🧬 Extract EUI-64 MAC (usually from src IP)
+  if (isLikelyEui64(addr)) {
+    String mac = extractMacFromEUI64(addr);
+    result += " 🧬 EUI-64 MAC: " + mac;
+  }
+
+  // 🎯 Target MAC suffix (from solicited-node multicast)
+  if (targetSuffixes &&
+      addr[0] == 0xFF && addr[1] == 0x02 &&
+      addr[11] == 0x01 && addr[12] == 0xFF) {
+    uint32_t suffix =
+      (uint32_t(addr[13]) << 16) |
+      (uint32_t(addr[14]) << 8) |
+      addr[15];
+
+    targetSuffixes->insert(suffix);
+
+    char suffixStr[12];
+    snprintf(suffixStr, sizeof(suffixStr), "%02X:%02X:%02X", addr[13], addr[14], addr[15]);
+    result += " 🎯 target suffix: " + String(suffixStr);
+  }
+
+  return result;
+}
+
+/*
 String formatIPv6(const uint8_t* addr, bool annotate = true, std::set<uint32_t>* targetSuffixes = nullptr) {
   char buf[40];
   snprintf(buf, sizeof(buf),
@@ -379,7 +639,7 @@ String formatIPv6(const uint8_t* addr, bool annotate = true, std::set<uint32_t>*
 
   return ip;
 }
-
+*/
 /*
 String formatIPv6(const uint8_t* addr, bool annotate = true) {
   char buf[40];
@@ -972,11 +1232,10 @@ if (etherType == 0x0800 && payloadLen >= 20) {
         if (code == 12 && len < 64) {
           char host[65] = {0};
           memcpy(host, options + 2, len);
-          String taggedHost = "DHCP:" + String(host);  // Replace "SOURCE"
+          String taggedHost = "DHCP:" + String(host);
           stats.df.dnsHostnames.insert(taggedHost);
+          snprintf(flowKey, sizeof(flowKey), "%s → %s (%s)", srcIp, dstIp, label);
           stats.df.dnsHostnamesByFlow[flowKey].insert(taggedHost);
-          //stats.df.dnsHostnames.insert(host);
-          //stats.df.dnsHostnamesByFlow[flowKey].insert(host);
           Serial.printf("📛 DHCP Hostname: %s\n", host);
           break;
         }
@@ -998,11 +1257,10 @@ if (etherType == 0x0800 && payloadLen >= 20) {
       }
       host[pos] = '\0';
       if (pos > 1) {
-        String taggedHost = "LLMR:" + String(host);  // Replace "SOURCE"
+        String taggedHost = "LLMR:" + String(host);
         stats.df.dnsHostnames.insert(taggedHost);
+        snprintf(flowKey, sizeof(flowKey), "%s → %s (%s)", srcIp, dstIp, label);
         stats.df.dnsHostnamesByFlow[flowKey].insert(taggedHost);
-        //stats.df.dnsHostnames.insert(host);
-        //stats.df.dnsHostnamesByFlow[flowKey].insert(host);
         Serial.printf("🌐 LLMNR Hostname: %s\n", host);
       }
     }
@@ -1015,11 +1273,10 @@ if (etherType == 0x0800 && payloadLen >= 20) {
         uint8_t len = *ptr++;
         for (uint8_t i = 0; i < len && ptr < end && i < sizeof(name) - 1; ++i)
           name[i] = (*ptr >= 32 && *ptr <= 126) ? *ptr++ : '.';
-        String taggedHost = "SOURCE: " + String(name);  // Replace "SOURCE"
+        String taggedHost = "SOURCE: " + String(name);
         stats.df.dnsHostnames.insert(taggedHost);
+        snprintf(flowKey, sizeof(flowKey), "%s → %s (%s)", srcIp, dstIp, label);
         stats.df.dnsHostnamesByFlow[flowKey].insert(taggedHost);
-        //stats.df.dnsHostnames.insert(name);
-        //stats.df.dnsHostnamesByFlow[flowKey].insert(name);
         Serial.printf("📡 NetBIOS Host: %s\n", name);
       }
     }
@@ -1065,6 +1322,7 @@ if (dstPort == 53 || dstPort == 5353 || srcPort == 53 || srcPort == 5353) {
       Serial.printf("🔁 PTR Record: %s → %s\n", name, ptrName);
       String tagged = (isMdns ? "mDNS: " : "DNS: ") + String(ptrName);
       stats.df.dnsHostnames.insert(tagged);
+      snprintf(flowKey, sizeof(flowKey), "%s → %s (%s)", srcIp, dstIp, label);
       stats.df.dnsHostnamesByFlow[flowKey].insert(tagged);
     }
 else if (type == 16) {  // TXT Record
@@ -1084,6 +1342,7 @@ else if (type == 16) {  // TXT Record
 
     String taggedField = taggedBase + " → " + String(field);
     stats.df.dnsHostnames.insert(taggedField);
+    snprintf(flowKey, sizeof(flowKey), "%s → %s (%s)", srcIp, dstIp, label);
     stats.df.dnsHostnamesByFlow[flowKey].insert(taggedField);
     Serial.printf("🔎 TXT Field: %s\n", field);
 
@@ -1109,10 +1368,11 @@ else if (type == 33 && dataLen >= 6) {  // SRV Record
   Serial.printf("🛰️ SRV Record: %s:%u (priority=%u weight=%u)\n",
                 targetName, port, priority, weight);
 
-  String label = String(isMdns ? "mDNS SRV: " : "DNS SRV: ") +
+  String hostLabel = String(isMdns ? "mDNS SRV: " : "DNS SRV: ") +
                  String(name) + " → " + String(targetName) + ":" + port;
-  stats.df.dnsHostnames.insert(label);
-  stats.df.dnsHostnamesByFlow[flowKey].insert(label);
+  stats.df.dnsHostnames.insert(hostLabel);
+  snprintf(flowKey, sizeof(flowKey), "%s → %s (%s)", srcIp, dstIp, label);
+  stats.df.dnsHostnamesByFlow[flowKey].insert(hostLabel);
 }
 
     ptr += dataLen;
@@ -1154,7 +1414,16 @@ else if (etherType == 0x86DD && payloadLen >= 40) {
   uint8_t nextHeader = ip6[6];
   uint16_t offset = 40;
 
-  // Handle IPv6 extension headers
+  std::set<uint32_t>& targetSuffixes = stats.df.targetMacSuffixes;
+
+  // 🧬 Optional MAC extraction from EUI-64 IPv6 address
+  if (isLikelyEui64(ip6 + 8)) {
+    String recoveredMac = extractMacFromEUI64(ip6 + 8);
+    stats.df.eui64Macs.insert(recoveredMac);
+    Serial.println("🧬 EUI-64 detected. MAC reconstructed: " + recoveredMac);
+  }
+
+  // Handle extension headers
   while ((nextHeader == 0 || nextHeader == 43 || nextHeader == 60 || nextHeader == 51 || nextHeader == 50) &&
          offset + 8 < payloadLen) {
     nextHeader = payload[offset];
@@ -1162,15 +1431,16 @@ else if (etherType == 0x86DD && payloadLen >= 40) {
     offset += 8 + extLen * 8;
   }
 
-  char srcIp[48], dstIp[48], flowKey[128], label[32] = "IPv6/Other";
-  formatIPv6Compact(ip6 + 8, srcIp);
-  formatIPv6Compact(ip6 + 24, dstIp);
+  // Format and annotate IPv6 addresses
+  String srcPlain = formatIPv6(ip6 + 8, true);
+  String dstPlain = formatIPv6(ip6 + 24, true, &targetSuffixes);
 
-  // --- ICMPv6 ---
+  char label[32] = "IPv6/Other";
+
+  // ---------------- ICMPv6 ----------------
   if (nextHeader == 58 && payloadLen >= offset + 4) {
     const uint8_t* icmp6 = payload + offset;
     uint8_t type = icmp6[0];
-
     if (type == 133) strcpy(label, "IPv6/ICMPv6/RS");
     else if (type == 134) strcpy(label, "IPv6/ICMPv6/RA");
     else if (type == 135) strcpy(label, "IPv6/ICMPv6/NS");
@@ -1180,7 +1450,7 @@ else if (etherType == 0x86DD && payloadLen >= 40) {
     stats.df.icmpv6Types.insert(label);
   }
 
-  // --- TCP ---
+  // ---------------- TCP ----------------
   else if (nextHeader == 6 && payloadLen >= offset + 20) {
     const uint8_t* tcp = payload + offset;
     uint16_t srcPort = (tcp[0] << 8) | tcp[1];
@@ -1198,55 +1468,70 @@ else if (etherType == 0x86DD && payloadLen >= 40) {
     Serial.println();
   }
 
-  // --- UDP ---
-else if (nextHeader == 17 && payloadLen >= offset + 8) {
-  const uint8_t* udp = payload + offset;
-  uint16_t srcPort = (udp[0] << 8) | udp[1];
-  uint16_t dstPort = (udp[2] << 8) | udp[3];
+  // ---------------- UDP ----------------
+  else if (nextHeader == 17 && payloadLen >= offset + 8) {
+    const uint8_t* udp = payload + offset;
+    uint16_t srcPort = (udp[0] << 8) | udp[1];
+    uint16_t dstPort = (udp[2] << 8) | udp[3];
+    const uint8_t* dns = udp + 8;
+    const uint8_t* end = payload + payloadLen;
 
-  stats.df.udpPorts.insert(srcPort);
-  stats.df.udpPorts.insert(dstPort);
-  strcpy(label, "IPv6/UDP");
+    stats.df.udpPorts.insert(srcPort);
+    stats.df.udpPorts.insert(dstPort);
+    strcpy(label, "IPv6/UDP");
 
-  Serial.printf("UDP: %u → %u\n", srcPort, dstPort);
+    Serial.printf("UDP: %u → %u\n", srcPort, dstPort);
 
-  // -------- DNS/mDNS Hostname Extraction --------
-  const uint8_t* dns = udp + 8;
-  const uint8_t* end = payload + payloadLen;
+    // -------- DNS/mDNS hostname extraction --------
+    if (dstPort == 5353 || srcPort == 5353) {
+      stats.df.etherTypeSummaryCounts["IPv6/UDP/mDNS"]++;
 
-  if (dstPort == 5353 || srcPort == 5353) {
-    stats.df.etherTypeSummaryCounts["IPv6/UDP/mDNS"]++;
+      const uint8_t* ptr = dns + 12;
+      char host[128] = {0};
+      size_t hostPos = 0;
 
-    const uint8_t* ptr = dns + 12;
-    char host[128] = {0};
-    size_t hostPos = 0;
-
-    while (ptr < end && *ptr && hostPos < sizeof(host) - 2) {
-      uint8_t len = *ptr++;
-      if (ptr + len > end) break;
-      for (uint8_t i = 0; i < len && hostPos < sizeof(host) - 2; ++i) {
-        char c = *ptr++;
-        host[hostPos++] = (c >= 32 && c <= 126) ? c : '.';
+      while (ptr < end && *ptr && hostPos < sizeof(host) - 2) {
+        uint8_t len = *ptr++;
+        if (ptr + len > end) break;
+        for (uint8_t i = 0; i < len && hostPos < sizeof(host) - 2; ++i) {
+          char c = *ptr++;
+          host[hostPos++] = (c >= 32 && c <= 126) ? c : '.';
+        }
+        host[hostPos++] = '.';
       }
-      host[hostPos++] = '.';
-    }
-    host[hostPos] = '\0';
+      host[hostPos] = '\0';
 
-    if (hostPos > 1) {
-      stats.df.dnsHostnames.insert(host);
-      stats.df.dnsHostnamesByFlow[flowKey].insert(host);
-      Serial.printf("🔍 mDNS Query (IPv6): %s\n", host);
+      if (hostPos > 1) {
+        // Construct compressed flow key for mapping
+        String labelStr(label);
+        String rawFlowKey = srcPlain + " → " + dstPlain + " (" + labelStr + ")";
+        String compressedKey = rawFlowKey;
+
+        compressedKey.replace("0000:", ":");
+        compressedKey.replace(":0000", ":");
+        while (compressedKey.indexOf(":::") != -1) compressedKey.replace(":::", "::");
+        while (compressedKey.indexOf("::0:") != -1) compressedKey.replace("::0:", "::");
+        while (compressedKey.indexOf(":0:") != -1) compressedKey.replace(":0:", "::");
+
+        stats.df.dnsHostnames.insert(host);
+        stats.df.dnsHostnamesByFlow[compressedKey].insert(host);
+        Serial.printf("🔍 mDNS Query (IPv6): %s\n", host);
+        Serial.printf("[DEBUG] Host stored: %s → %s\n", compressedKey.c_str(), host);
+      }
     }
   }
-}
 
-  snprintf(flowKey, sizeof(flowKey), "%s → %s (%s)", srcIp, dstIp, label);
+  // ---------------- Flow Tracking ----------------
+  char flowKey[128];
+  snprintf(flowKey, sizeof(flowKey), "%s → %s (%s)", srcPlain.c_str(), dstPlain.c_str(), label);
   stats.df.ipv6Flows[flowKey]++;
   stats.df.ipv6FlowBytes[flowKey] += payloadLen;
   stats.df.ipv6FlowBytesSqSum[flowKey] += static_cast<uint64_t>(payloadLen) * payloadLen;
   stats.df.etherTypeSummaryCounts[label]++;
+
   Serial.printf("🧭 IPv6 Flow: %s | +%u bytes\n", flowKey, payloadLen);
 }
+
 
 }
 
@@ -2096,82 +2381,70 @@ void printMacStats() {
       amsduRateDown, eospRateDown, encRateDown);
     }
 
-    if (!stats.df.etherTypeSummaryCounts.empty()) {
-      Serial.print("    🔗 EtherTypes: ");
+if (!stats.df.etherTypeSummaryCounts.empty()) {
+  Serial.print("    🔗 EtherTypes: ");
 
-      // Convert map to vector for sorting
-      std::vector<std::pair<String, uint32_t>> sorted(stats.df.etherTypeSummaryCounts.begin(), stats.df.etherTypeSummaryCounts.end());
-      std::sort(sorted.begin(), sorted.end(),
-          [](const std::pair<String, uint32_t>& a, const std::pair<String, uint32_t>& b) {
-            return a.second < b.second;
-          });
-      //std::sort(sorted.begin(), sorted.end(), [](auto& a, auto& b) {
-      //  return b.second < a.second;  // descending order
-      //});
+  std::vector<std::pair<String, uint32_t>> sorted(stats.df.etherTypeSummaryCounts.begin(), stats.df.etherTypeSummaryCounts.end());
+  std::sort(sorted.begin(), sorted.end(),
+      [](const std::pair<String, uint32_t>& a, const std::pair<String, uint32_t>& b) {
+        return a.second < b.second;
+      });
 
-      int total = 0;
-      for (auto& pair : sorted) total += pair.second;
+  int total = 0;
+  for (auto& pair : sorted) total += pair.second;
 
-      int shown = 0;
-      for (auto& pair : sorted) {
-        if (shown < 3 || pair.second > 1) {  // top 3 or repeated types
-          Serial.printf("%s(%u)  ", pair.first.c_str(), pair.second);
-          shown++;
-        }
-      }
-
-      if (shown < (int)sorted.size()) {
-        int otherCount = 0;
-        for (size_t i = shown; i < sorted.size(); ++i) {
-          otherCount += sorted[i].second;
-        }
-        Serial.printf("Other(%d)", otherCount);
-      }
-
-      // Combine known MACs
-      std::set<String> knownMacs = stats.rxMacSummaries;
-      knownMacs.insert(stats.bssidSummaries.begin(), stats.bssidSummaries.end());
-
-      printFlowSummary(
-        stats.df.ipv4Flows,
-        stats.df.ipv4FlowBytes,
-        stats.df.ipv4FlowBytesSqSum,
-        stats.df.dnsHostnamesByFlow,
-        knownMacs,
-        "IPv4 Flows",
-        7 // maxToShow
-        );
-
-      printFlowSummary(
-        stats.df.ipv6Flows,
-        stats.df.ipv6FlowBytes,
-        stats.df.ipv6FlowBytesSqSum,
-        {},          // IPv6 doesn’t usually have hostnames
-        knownMacs,
-        "IPv6 Flows",
-        7 // maxToShow
-      );
-
-      //printFlowSummary(
-      //  stats.df.ipv4Flows,
-      //  stats.df.ipv4FlowBytes,
-      //  stats.df.ipv4FlowBytesSqSum,
-      //  stats.df.dnsHostnamesByFlow,
-      //  "IPv4 Flows",
-      //  7 //maxToShow
-      //);
-
-      //printFlowSummary(
-      //  stats.df.ipv6Flows,
-      //  stats.df.ipv6FlowBytes,
-      //  stats.df.ipv6FlowBytesSqSum,
-      //  stats.df.dnsHostnamesByFlow,
-      //  "IPv6 Flows",
-      //  7 // maxToShow
-      //);
-
-      Serial.println();
+  int shown = 0;
+  for (auto& pair : sorted) {
+    if (shown < 3 || pair.second > 1) {
+      Serial.printf("%s(%u)  ", pair.first.c_str(), pair.second);
+      shown++;
     }
+  }
+
+  if (shown < (int)sorted.size()) {
+    int otherCount = 0;
+    for (size_t i = shown; i < sorted.size(); ++i) {
+      otherCount += sorted[i].second;
+    }
+    Serial.printf("Other(%d)", otherCount);
+  }
+
+  Serial.println();
+}
+
+// 🟢 Always attempt to print flows if they exist
+if (!stats.df.ipv4Flows.empty() || !stats.df.ipv6Flows.empty()) {
+  std::set<String> knownMacs = stats.rxMacSummaries;
+  knownMacs.insert(stats.bssidSummaries.begin(), stats.bssidSummaries.end());
+
+  if (!stats.df.ipv4Flows.empty()) {
+printFlowSummary(
+  stats.df.ipv4Flows,
+  stats.df.ipv4FlowBytes,
+  stats.df.ipv4FlowBytesSqSum,
+  stats.df.dnsHostnamesByFlow,
+  knownMacs,
+  stats.df.eui64Macs,  // ← NEW field in datFrameInfo struct
+  "IPv4 Flows",
+  7
+  );
+}
+
+  if (!stats.df.ipv6Flows.empty()) {
+printFlowSummary(
+  stats.df.ipv6Flows,
+  stats.df.ipv6FlowBytes,
+  stats.df.ipv6FlowBytesSqSum,
+  stats.df.dnsHostnamesByFlow,
+  knownMacs,
+  stats.df.eui64Macs,  // same here
+  "IPv6 Flows",
+  7
+  );
+}
+
+}
+
 
   } // End for loop
 
@@ -2287,4 +2560,124 @@ void printGlobalFrameStats() {
     Serial.printf("  • %s %s → %d\n", combo, dirSymbol, count);
   }
 }
+*/
+
+
+/*
+else if (etherType == 0x86DD && payloadLen >= 40) {
+  const uint8_t* ip6 = payload;
+  uint8_t nextHeader = ip6[6];
+  uint16_t offset = 40;
+
+// Optional MAC extraction from EUI-64 IPv6 address
+if (isLikelyEui64(ip6 + 8)) {
+  String recoveredMac = extractMacFromEUI64(ip6 + 8);
+  Serial.println("🔍 EUI-64 detected. MAC reconstructed: " + recoveredMac);
+  stats.df.dnsHostnames.insert("EUI64:" + recoveredMac);  // optional tagging
+  // You could also save in a dedicated set like:
+  // stats.df.eui64Macs.insert(recoveredMac);
+}
+
+  // Handle IPv6 extension headers
+  while ((nextHeader == 0 || nextHeader == 43 || nextHeader == 60 || nextHeader == 51 || nextHeader == 50) &&
+         offset + 8 < payloadLen) {
+    nextHeader = payload[offset];
+    uint8_t extLen = payload[offset + 1];
+    offset += 8 + extLen * 8;
+  }
+
+  char srcIp[48], dstIp[48], flowKey[128], label[32] = "IPv6/Other";
+  formatIPv6Compact(ip6 + 8, srcIp);
+  formatIPv6Compact(ip6 + 24, dstIp);
+
+  // --- ICMPv6 ---
+  if (nextHeader == 58 && payloadLen >= offset + 4) {
+    const uint8_t* icmp6 = payload + offset;
+    uint8_t type = icmp6[0];
+
+    if (type == 133) strcpy(label, "IPv6/ICMPv6/RS");
+    else if (type == 134) strcpy(label, "IPv6/ICMPv6/RA");
+    else if (type == 135) strcpy(label, "IPv6/ICMPv6/NS");
+    else if (type == 136) strcpy(label, "IPv6/ICMPv6/NA");
+    else strcpy(label, "IPv6/ICMPv6/Other");
+
+    stats.df.icmpv6Types.insert(label);
+  }
+
+  // --- TCP ---
+  else if (nextHeader == 6 && payloadLen >= offset + 20) {
+    const uint8_t* tcp = payload + offset;
+    uint16_t srcPort = (tcp[0] << 8) | tcp[1];
+    uint16_t dstPort = (tcp[2] << 8) | tcp[3];
+    uint8_t flags = tcp[13];
+
+    stats.df.tcpPorts.insert(srcPort);
+    stats.df.tcpPorts.insert(dstPort);
+    strcpy(label, "IPv6/TCP");
+
+    Serial.printf("TCP: %u → %u | Flags:", srcPort, dstPort);
+    if (flags & 0x02) Serial.print(" SYN");
+    if (flags & 0x10) Serial.print(" ACK");
+    if (flags & 0x01) Serial.print(" FIN");
+    Serial.println();
+  }
+
+  // --- UDP ---
+else if (nextHeader == 17 && payloadLen >= offset + 8) {
+  const uint8_t* udp = payload + offset;
+  uint16_t srcPort = (udp[0] << 8) | udp[1];
+  uint16_t dstPort = (udp[2] << 8) | udp[3];
+
+  stats.df.udpPorts.insert(srcPort);
+  stats.df.udpPorts.insert(dstPort);
+  strcpy(label, "IPv6/UDP");
+
+  Serial.printf("UDP: %u → %u\n", srcPort, dstPort);
+
+  // -------- DNS/mDNS Hostname Extraction --------
+  const uint8_t* dns = udp + 8;
+  const uint8_t* end = payload + payloadLen;
+
+  if (dstPort == 5353 || srcPort == 5353) {
+    stats.df.etherTypeSummaryCounts["IPv6/UDP/mDNS"]++;
+
+    const uint8_t* ptr = dns + 12;
+    char host[128] = {0};
+    size_t hostPos = 0;
+
+    while (ptr < end && *ptr && hostPos < sizeof(host) - 2) {
+      uint8_t len = *ptr++;
+      if (ptr + len > end) break;
+      for (uint8_t i = 0; i < len && hostPos < sizeof(host) - 2; ++i) {
+        char c = *ptr++;
+        host[hostPos++] = (c >= 32 && c <= 126) ? c : '.';
+      }
+      host[hostPos++] = '.';
+    }
+    host[hostPos] = '\0';
+
+    if (hostPos > 1) {
+      stats.df.dnsHostnames.insert(host);
+      snprintf(flowKey, sizeof(flowKey), "%s → %s (%s)", srcIp, dstIp, label);
+      String compressedKey = String(flowKey);
+compressedKey.replace("0000:", ":");
+compressedKey.replace(":0000", ":");
+while (compressedKey.indexOf(":::" ) != -1) compressedKey.replace(":::", "::");
+while (compressedKey.indexOf("::0:" ) != -1) compressedKey.replace("::0:", "::");
+while (compressedKey.indexOf(":0:"  ) != -1) compressedKey.replace(":0:", "::");
+stats.df.dnsHostnamesByFlow[compressedKey].insert(host);
+      //stats.df.dnsHostnamesByFlow[flowKey].insert(host);
+      Serial.printf("🔍 mDNS Query (IPv6): %s\n", host);
+      Serial.printf("[DEBUG] Host stored: %s → %s\n", compressedKey, host);
+    }
+  }
+}
+  snprintf(flowKey, sizeof(flowKey), "%s → %s (%s)", srcIp, dstIp, label);
+  stats.df.ipv6Flows[flowKey]++;
+  stats.df.ipv6FlowBytes[flowKey] += payloadLen;
+  stats.df.ipv6FlowBytesSqSum[flowKey] += static_cast<uint64_t>(payloadLen) * payloadLen;
+  stats.df.etherTypeSummaryCounts[label]++;
+  Serial.printf("🧭 IPv6 Flow: %s | +%u bytes\n", flowKey, payloadLen);
+}
+
 */

@@ -106,6 +106,7 @@ struct datFrameInfo {
   // Key: "192.168.0.2 → 8.8.8.8"
   // Value: { "example.com", "google.com" }
   std::set<uint32_t> targetMacSuffixes;  // Lower 24-bit MAC suffixes seen as targets (EUI-64 deduction)
+  std::set<String> eui64Macs;
   // EAPOL
   EapolHandshakeDetail handshake;
   uint16_t eapolHandshakeCounts[5] = {0};
