@@ -16,6 +16,10 @@ std::map<FrameStatKey, int> globalFrameStats;
 //=============================================================
 // Helpers
 //=============================================================
+void macToString(const uint8_t* mac, char* out) {
+  sprintf(out, "%02X:%02X:%02X:%02X:%02X:%02X",
+          mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+}
 void formatIPv6Short(const uint8_t* addr, char* buf, size_t bufLen) {
   snprintf(buf, bufLen,
     "%x:%x:%x:%x:%x:%x:%x:%x",
@@ -1158,20 +1162,35 @@ void parseDataFrame(const uint8_t* frame, uint16_t len, const DeviceCapture& cap
   if (etherType == 0x888E && payloadLen >= 100) {
     uint8_t type = payload[1];
     if (type == 3) {
-      uint16_t keyInfo = (payload[4] << 8) | payload[5];
-      bool mic = keyInfo & (1 << 8);
-      bool ack = keyInfo & (1 << 7);
-      bool install = keyInfo & (1 << 6);
-      bool pairwise = keyInfo & (1 << 3);
 
+      uint16_t keyInfo = (payload[4] << 8) | payload[5];
+      bool mic      = keyInfo & 0x0200;
+      bool ack      = keyInfo & 0x0080;
+      bool install  = keyInfo & 0x0040;
+      bool pairwise = keyInfo & 0x0001;
+
+      //bool mic = keyInfo & (1 << 8);
+      //bool ack = keyInfo & (1 << 7);
+      //bool install = keyInfo & (1 << 6);
+      //bool pairwise = keyInfo & (1 << 3);
+
+      Serial.printf("[DEBUG] keyInfo: 0x%04X | Binary: ", keyInfo);
+      for (int i = 15; i >= 0; --i)
+        Serial.print((keyInfo >> i) & 1);
+      Serial.println();
       Serial.printf("🔐 EAPOL Key Frame | MIC:%d | ACK:%d | Install:%d | Pairwise:%d\n", mic, ack, install, pairwise);
+      if (mic && install && !pairwise) {
+        Serial.println("🔁 Group Key Handshake (1/2) — GTK Install");
+      } else if (mic && !install && !ack && !pairwise) {
+        Serial.println("✅ Group Key Handshake (2/2) — Client ACK");
+      }
 
       EapolMsgType msgType = EAPOL_MSG_UNKNOWN;
       if (!mic && ack) msgType = EAPOL_MSG_1_4;
       else if (mic && ack && !install) msgType = EAPOL_MSG_2_4;
       else if (mic && install && !ack) msgType = EAPOL_MSG_3_4;
       else if (mic && !install && !ack) msgType = EAPOL_MSG_4_4;
-
+      
       const char* msgLabel[] = {"Unknown", "1/4", "2/4", "3/4", "4/4"};
       Serial.printf("📡 WPA Handshake Detected: Msg %s\n", msgLabel[msgType]);
 
@@ -1205,11 +1224,14 @@ void parseDataFrame(const uint8_t* frame, uint16_t len, const DeviceCapture& cap
   // --------------------- IPv4 ---------------------
 if (etherType == 0x0800 && payloadLen >= 20) {
   const uint8_t* ip = payload;
+  Serial.printf("[DEBUG] Src IP raw bytes: %02X %02X %02X %02X\n",
+            ip[12], ip[13], ip[14], ip[15]);
   uint8_t ihl = (ip[0] & 0x0F) * 4;
   uint8_t protocol = ip[9];
 
   char srcIp[16], dstIp[16], flowKey[64];
   ipToString(ip + 12, srcIp, sizeof(srcIp));
+  Serial.printf("[DEBUG] ipToString(): %s\n", srcIp);
   ipToString(ip + 16, dstIp, sizeof(dstIp));
   const uint8_t* end = payload + payloadLen;
   const char* label = "IPv4/Other";
@@ -2189,6 +2211,58 @@ if (fp.wpsSumVar.length())
 
   return fp;
 }
+
+//Deauth frame parsing
+void parseDeauthFrame(const uint8_t* frame, uint16_t len, unsigned long now) {
+  if (len < 26) return;
+
+  uint8_t subtype = (frame[0] >> 4) & 0x0F;
+  uint8_t type = (frame[0] >> 2) & 0x03;
+  if (!(type == 0 && subtype == 0x0C)) return;
+
+  const uint8_t* srcMac = frame + 10;
+  const uint8_t* dstMac = frame + 4;
+  const uint8_t* bssid  = frame + 16;
+
+  bool isBroadcast = memcmp(dstMac, "\xFF\xFF\xFF\xFF\xFF\xFF", 6) == 0;
+  bool fromClient = memcmp(srcMac, bssid, 6) != 0;
+  uint16_t reason = frame[24] | (frame[25] << 8);
+
+  // Skip clean client disconnects
+  if (fromClient && reason == 8) return;
+
+  // Use a static MAC hash key (fast and compact)
+  uint32_t macHash = (srcMac[2] << 24) | (srcMac[3] << 16) | (srcMac[4] << 8) | srcMac[5];
+
+  static std::map<uint32_t, uint16_t> deauthCountBySender;
+  static unsigned long lastCheck = 0;
+  const uint32_t INTERVAL = 5000;
+  const uint16_t THRESH = 10;
+
+  deauthCountBySender[macHash]++;
+
+  if (now - lastCheck > INTERVAL) {
+    for (const auto& kv : deauthCountBySender) {
+      if (kv.second >= THRESH) {
+        uint8_t fakeMac[6] = {
+          0x00, 0x00,
+          (uint8_t)(kv.first >> 24),
+          (uint8_t)(kv.first >> 16),
+          (uint8_t)(kv.first >> 8),
+          (uint8_t)(kv.first)
+        };
+        char mac[18];
+        macToString(fakeMac, mac);
+        Serial.printf("🚨 Deauth Attack Suspected: %s | Count: %u\n", mac, kv.second);  
+      }
+    }
+    deauthCountBySender.clear();
+    lastCheck = now;
+  }
+
+  // Optional: Print only summary, not every frame
+}
+
 
 //====================================================
 // Print functions

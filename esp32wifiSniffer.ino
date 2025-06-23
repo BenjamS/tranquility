@@ -13,6 +13,7 @@ const unsigned long SLEEP_DURATION  = 60000;  // 60 seconds sleep
 const int           MAX_DEVICES     = 100;    // Max devices tracked
 const int           CHANNELS[]      = {1, 6, 11};
 const int           CHANNEL_COUNT   = sizeof(CHANNELS) / sizeof(CHANNELS[0]);
+const uint32_t CHANNEL_SWITCH_INTERVAL = 5000;  // 1000 = 1 second
 
 // ---- SCAN STATE ----
 bool          scanning        = true;
@@ -21,6 +22,8 @@ unsigned long sleepStart      = 0;
 unsigned long lastChannelSwitch = 0;
 int           channelIndex    = 0;
 
+unsigned long lastHeapLogTime = 0;
+const uint32_t HEAP_LOG_INTERVAL = 3000; // log every 3 seconds
 
 //===========================================================
 // Sniffer
@@ -141,10 +144,10 @@ void sniffer_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
       cap.mgmtInfo.ssid = ssid;
       Serial.println("📶 [SSID] Extracted (extractSsid): \"" + ssid + "\"");
       addSsidToStats(macStatsMap[cap.senderMac], ssid);
-      Serial.println("[🧪] SSIDs currently stored for " + cap.senderMac + ":");
-      for (const String& s : macStatsMap[cap.senderMac].mgmt.seenSsids) {
-      Serial.println("  • " + s);
-}
+      //Serial.println("[🧪DEBUG] SSIDs currently stored for " + cap.senderMac + ":");
+      //for (const String& s : macStatsMap[cap.senderMac].mgmt.seenSsids) {
+      //  Serial.println("  • " + s);
+      //}
 
     }
     parseMgmtFrame(ieData, ieLen, cap);
@@ -162,6 +165,9 @@ void sniffer_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
     if (cap.mgmtInfo.asciiHints.length()) {
       stats.mgmt.asciiHints = cap.mgmtInfo.asciiHints;
     } 
+
+    parseDeauthFrame(frame, len, millis());
+
   }
 
 }
@@ -212,12 +218,19 @@ void setup() {
 void loop() {
   unsigned long now = millis();
   // rotate channels during scan
-  if (scanning && now - lastChannelSwitch >= SCAN_DURATION/CHANNEL_COUNT) {
-    channelIndex = (channelIndex+1)%CHANNEL_COUNT;
+  if (scanning && now - lastChannelSwitch >= CHANNEL_SWITCH_INTERVAL) {
+    channelIndex = (channelIndex + 1) % CHANNEL_COUNT;
     esp_wifi_set_channel(CHANNELS[channelIndex], WIFI_SECOND_CHAN_NONE);
     lastChannelSwitch = now;
     Serial.printf("[DEBUG] Switching to channel %d\n", CHANNELS[channelIndex]);
-  }
+}
+
+  //if (scanning && now - lastChannelSwitch >= SCAN_DURATION/CHANNEL_COUNT) {
+  //  channelIndex = (channelIndex+1)%CHANNEL_COUNT;
+  //  esp_wifi_set_channel(CHANNELS[channelIndex], WIFI_SECOND_CHAN_NONE);
+  //  lastChannelSwitch = now;
+  //  Serial.printf("[DEBUG] Switching to channel %d\n", CHANNELS[channelIndex]);
+  //}
 
   // end-of-scan: print & sleep
   if (scanning && now - scanStart >= SCAN_DURATION) {
@@ -251,6 +264,23 @@ void loop() {
     esp_wifi_set_promiscuous(true);
     esp_wifi_set_channel(CHANNELS[0], WIFI_SECOND_CHAN_NONE);
   }
+
+// Log heap every few seconds
+  if (now - lastHeapLogTime >= HEAP_LOG_INTERVAL) {
+    lastHeapLogTime = now;
+    Serial.printf("🧠 [HEAP MONITOR] Free: %6lu B | 📦 Largest Block: %6lu B\n",
+              ESP.getFreeHeap(),
+              heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+
+    Serial.printf("[DEBUG] Free heap: %lu bytes | Largest block: %lu bytes\n",
+                  ESP.getFreeHeap(),
+                  heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+  }
+
+if (freeHeap < 60000 || largest < 20000) {
+  Serial.println("🚨 [WARNING] Heap low — consider stopping scan or resetting.");
+}
+
 
   delay(50);
 }

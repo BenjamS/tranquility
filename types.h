@@ -268,7 +268,9 @@ const VendorOUI vendorTable[] = {
   {{0x10, 0x27, 0xF5}, "TPLink"}, //TP-Link Systems Inc
   {{0x70, 0xF1, 0x1C}, "ShenOg"}, //Shenzhen Ogemray Technology Co.,Ltd
   {{0xB8, 0x94, 0xE7}, "Xiaomi"}, //Xiaomi Communications Co Ltd
-
+//F4:7B:09 Intel Corporate
+//B0:52:16 Hon Hai Precision Ind. Co.,Ltd.
+//B4:4C:3B Zhejiang Dahua Technology Co., Ltd.
 };
 
 const size_t vendorCount = sizeof(vendorTable) / sizeof(vendorTable[0]);

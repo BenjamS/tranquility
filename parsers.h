@@ -27,6 +27,7 @@ void parseDataFrame(const uint8_t* frame, uint16_t len, const DeviceCapture& cap
 void parseMgmtIEs(const uint8_t* data, uint16_t len, DeviceCapture& cap);
 void parseMgmtFrame(const uint8_t* frame, uint16_t len, DeviceCapture& cap);
 wpsFingerprint parseWpsIE(const uint8_t* data, int len);
+void parseDeauthFrame(const uint8_t* frame, uint16_t len, unsigned long now);
 //=============================================
 // Printers
 //=============================================
