@@ -9,7 +9,7 @@ const char* directionToStr(FrameDirection dir);
 void addSsidToStats(MacStats& stats, const String& ssid);
 void parseUnknownAsciiIe(uint8_t tagId, const uint8_t* tagData, uint8_t tagLen, String& output);
 //void parseUnknownAsciiIe(uint8_t tagNumber, const uint8_t* tagData, uint8_t tagLength, String& asciiStorage);
-String extractSsid(const uint8_t* payload, int len);
+void extractSsid(const uint8_t* payload, int len, String& out);
 String abbreviateMacPurpose(const String& purpose);
 void initSD();
 String getScanTimestamp();
@@ -25,7 +25,7 @@ void parseGlobalItems(const wifi_promiscuous_pkt_t* ppkt, DeviceCapture& cap);
 void updateMacStatsFromGlobalItems(const DeviceCapture& cap);
 void parseDataFrame(const uint8_t* frame, uint16_t len, const DeviceCapture& cap);
 void parseMgmtIEs(const uint8_t* data, uint16_t len, DeviceCapture& cap);
-void parseMgmtFrame(const uint8_t* frame, uint16_t len, DeviceCapture& cap);
+//void parseMgmtFrame(const uint8_t* frame, uint16_t len, DeviceCapture& cap);
 wpsFingerprint parseWpsIE(const uint8_t* data, int len);
 void parseDeauthFrame(const uint8_t* frame, uint16_t len, unsigned long now);
 //=============================================

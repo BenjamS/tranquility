@@ -13,9 +13,21 @@
 std::map<String, MacStats> macStatsMap;
 std::map<FrameStatKey, int> globalFrameStats;
 
+const size_t MAX_SSID_TRACK = 10;
+
 //=============================================================
 // Helpers
 //=============================================================
+bool isCompleteHandshake(const EapolHandshakeDetail& hs) {
+  return hs.anonceSeen && hs.snonceSeen;
+}
+
+void printHexLine(const uint8_t* data, size_t len) {
+  for (size_t i = 0; i < len; ++i) {
+    Serial.printf("%02X", data[i]);
+  }
+}
+
 void macToString(const uint8_t* mac, char* out) {
   sprintf(out, "%02X:%02X:%02X:%02X:%02X:%02X",
           mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
@@ -687,10 +699,44 @@ const char* directionToStr(FrameDirection dir) {
 void addSsidToStats(MacStats& stats, const String& ssid) {
   if (ssid.length() == 0) return;
 
+  auto& ssids = stats.mgmt.seenSsids;
+
+  // Already seen
+  if (ssids.count(ssid)) return;
+
+  // Still under limit
+  if (ssids.size() < MAX_SSID_TRACK) {
+    ssids.insert(ssid);
+    Serial.println("[📡] New SSID for MAC: \"" + ssid + "\"");
+    return;
+  }
+
+  // Overflow: bump hidden count
+  stats.mgmt.hiddenSsidCount++;
+
+  // Insert or update the (+x more) entry
+  String marker = "(+" + String(stats.mgmt.hiddenSsidCount) + " more)";
+  
+  // Erase previous marker if exists
+  for (auto it = ssids.begin(); it != ssids.end(); ++it) {
+    if (it->startsWith("(+")) {
+      ssids.erase(it);
+      break;
+    }
+  }
+
+  ssids.insert(marker);
+}
+
+/*
+void addSsidToStats(MacStats& stats, const String& ssid) {
+  if (ssid.length() == 0) return;
+
   if (stats.mgmt.seenSsids.insert(ssid).second) {
     Serial.println("[📡] New SSID discovered for MAC (addSsidToStats): \"" + ssid + "\"");
   }
 }
+*/
 
 void parseUnknownAsciiIe(uint8_t tagId, const uint8_t* tagData, uint8_t tagLen, String& output) {
   // Known tags — ignore these
@@ -725,6 +771,31 @@ void parseUnknownAsciiIe(uint8_t tagId, const uint8_t* tagData, uint8_t tagLen, 
   Serial.printf("  🔍 [ASCII Tag] 0x%02X (%3d): \"%s\"\n", tagId, tagId, result.c_str());
 }
 
+void extractSsid(const uint8_t* payload, int len, String& out) {
+  out = "";
+  int offset = 0;
+  while (offset + 2 <= len) {
+    uint8_t id = payload[offset];
+    uint8_t tagLen = payload[offset + 1];
+
+    if (offset + 2 + tagLen > len) break;
+    if (id == 0 && tagLen <= 32) {
+      if (tagLen == 0) return;
+      out.reserve(tagLen);  // Optional: prevent reallocs
+
+      for (int i = 0; i < tagLen; ++i) {
+        char c = payload[offset + 2 + i];
+        if (c >= 32 && c <= 126) {
+          out += c;
+        }
+      }
+      return;
+    }
+    offset += 2 + tagLen;
+  }
+}
+
+/*
 String extractSsid(const uint8_t* payload, int len) {
   int offset = 0;
   while (offset + 2 <= len) {
@@ -750,7 +821,7 @@ String extractSsid(const uint8_t* payload, int len) {
 
   return "";
 }
-
+*/
 String abbreviateMacPurpose(const String& purpose) {
   if (purpose == "Broadcast") return "BC";
   if (purpose == "IPv6 mDNS (33:33:00:00:00:01)") return "mDNS6";
@@ -1185,12 +1256,27 @@ void parseDataFrame(const uint8_t* frame, uint16_t len, const DeviceCapture& cap
         Serial.println("✅ Group Key Handshake (2/2) — Client ACK");
       }
 
-      EapolMsgType msgType = EAPOL_MSG_UNKNOWN;
-      if (!mic && ack) msgType = EAPOL_MSG_1_4;
-      else if (mic && ack && !install) msgType = EAPOL_MSG_2_4;
-      else if (mic && install && !ack) msgType = EAPOL_MSG_3_4;
-      else if (mic && !install && !ack) msgType = EAPOL_MSG_4_4;
-      
+EapolMsgType msgType = EAPOL_MSG_UNKNOWN;
+
+if (!mic && ack) {
+  msgType = EAPOL_MSG_1_4;
+}
+else if (mic && ack && !install && pairwise) {
+  msgType = EAPOL_MSG_2_4;
+}
+else if (mic && install && !ack && pairwise) {
+  msgType = EAPOL_MSG_3_4;
+}
+else if (mic && !install && !ack && pairwise) {
+  msgType = EAPOL_MSG_4_4;
+}
+else if (mic && install && !ack && !pairwise) {
+  Serial.println("🔁 Group Key Handshake (1/2) — GTK Install");
+}
+else if (mic && !install && !ack && !pairwise) {
+  Serial.println("✅ Group Key Handshake (2/2) — Client ACK");
+}
+     
       const char* msgLabel[] = {"Unknown", "1/4", "2/4", "3/4", "4/4"};
       Serial.printf("📡 WPA Handshake Detected: Msg %s\n", msgLabel[msgType]);
 
@@ -1216,6 +1302,18 @@ void parseDataFrame(const uint8_t* frame, uint16_t len, const DeviceCapture& cap
       if (stats.mgmt.ssid.length() && hs.ssid.length() == 0) {
         hs.ssid = stats.mgmt.ssid;
         Serial.println("🔖 SSID saved: " + hs.ssid);
+      }
+
+      if (hs.anonceSeen && hs.snonceSeen) {
+        Serial.println("🎉 4-Way Handshake Complete!");
+
+        Serial.print("ANonce: ");
+        printHexLine(hs.anonce, 32);
+        Serial.println();
+
+        Serial.print("SNonce: ");
+        printHexLine(hs.snonce, 32);
+        Serial.println();
       }
     }
     return;
@@ -1826,7 +1924,7 @@ else if (etherType == 0x86DD && payloadLen >= 40) {
 }
 
 */
-
+/*
 //---Mgmt frame parsing---------------------
 void parseMgmtFrame(const uint8_t* frame, uint16_t len, DeviceCapture& cap) {
   if (len < 24) return;  // sanity check
@@ -1883,6 +1981,7 @@ uint16_t ieLen = len - offset;
   cap.mgmtInfo = MgmtInfo();  // clears ssid, wps, asciiHints, etc.
   parseMgmtIEs(ieData, ieLen, cap);
 }
+*/
 
 void parseMgmtIEs(const uint8_t* data, uint16_t len, DeviceCapture& cap) {
   int offset = 0;

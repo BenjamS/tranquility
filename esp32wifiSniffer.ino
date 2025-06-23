@@ -22,8 +22,12 @@ unsigned long sleepStart      = 0;
 unsigned long lastChannelSwitch = 0;
 int           channelIndex    = 0;
 
-unsigned long lastHeapLogTime = 0;
-const uint32_t HEAP_LOG_INTERVAL = 3000; // log every 3 seconds
+// ---- Heap memory monitoring ----
+static unsigned long lastHeapLogTime = 0;
+const uint32_t HEAP_LOG_INTERVAL = 2000;  // 1000 = 1 second
+
+// ---- Ephemeral probe request counter ----
+unsigned int ephemeralProbeCount = 0;
 
 //===========================================================
 // Sniffer
@@ -92,6 +96,11 @@ void sniffer_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
   //-------------------------------------------------------------
   //Type 0 frames (management frames)
   if(isMgmtFrame){
+    // ---Handle deauth frames---
+    if (frameType == 0 && subtype == 0x0C) {
+      parseDeauthFrame(frame, len, millis());
+    }
+    // ------
     // Set parsing offset according to subtype
     uint16_t offset;
     switch (cap.subtype) {
@@ -139,7 +148,21 @@ void sniffer_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
     }
     //----------------------
     // Parse Information Elements
-    String ssid = extractSsid(ieData, ieLen);
+    //parseMgmtFrame(ieData, ieLen, cap);
+    // Parse all IEs including WPS
+    cap.mgmtInfo = MgmtInfo();  // clears ssid, wps, asciiHints, etc.
+    parseMgmtIEs(ieData, ieLen, cap);
+    static String ssid;
+    ssid = "";  // clear it before reuse
+    extractSsid(ieData, ieLen, ssid);
+    bool isProbeRequest = (frameType == 0 && subtype == 0x04);
+    bool noSSID = ssid.length() == 0;
+    //bool noVendor = (getVendorName(cap.senderMac).length() == 0);  // Or however you check vendor
+    //bool shortDuration = cap.durationMs < 3;
+    if (isProbeRequest && noSSID) {
+      ephemeralProbeCount++;  // ✅ Count but skip
+     return;  // ❌ Don’t store in macStatsMap
+    }
     if (ssid.length()) {
       cap.mgmtInfo.ssid = ssid;
       Serial.println("📶 [SSID] Extracted (extractSsid): \"" + ssid + "\"");
@@ -150,7 +173,6 @@ void sniffer_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
       //}
 
     }
-    parseMgmtFrame(ieData, ieLen, cap);
     // Merge extracted mgmtInfo into per-MAC stats
     MacStats& stats = macStatsMap[cap.senderMac];
 
@@ -165,8 +187,6 @@ void sniffer_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
     if (cap.mgmtInfo.asciiHints.length()) {
       stats.mgmt.asciiHints = cap.mgmtInfo.asciiHints;
     } 
-
-    parseDeauthFrame(frame, len, millis());
 
   }
 
@@ -244,6 +264,10 @@ void loop() {
     //---print table here
     //printScanSummaryTable();
     printGlobalFrameStats();
+    Serial.printf("🧹 Ephemeral probes skipped: %u (%.1f%% of total MACs)\n",
+      ephemeralProbeCount,
+      100.0 * ephemeralProbeCount / (ephemeralProbeCount + macStatsMap.size()));
+    ephemeralProbeCount = 0;  // reset for next scan
     printMacStats();
     Serial.println("\n[INFO] Scan done, sleeping...\n");
   // sleep between scans
@@ -263,22 +287,25 @@ void loop() {
     esp_wifi_start();
     esp_wifi_set_promiscuous(true);
     esp_wifi_set_channel(CHANNELS[0], WIFI_SECOND_CHAN_NONE);
+
   }
 
-// Log heap every few seconds
+    // Log heap every few seconds during scan
+if (scanning) {
+  unsigned long now = millis();
   if (now - lastHeapLogTime >= HEAP_LOG_INTERVAL) {
     lastHeapLogTime = now;
+
+    size_t freeHeap = ESP.getFreeHeap();
+    size_t largest = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
+
     Serial.printf("🧠 [HEAP MONITOR] Free: %6lu B | 📦 Largest Block: %6lu B\n",
-              ESP.getFreeHeap(),
-              heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+                  freeHeap, largest);
 
-    Serial.printf("[DEBUG] Free heap: %lu bytes | Largest block: %lu bytes\n",
-                  ESP.getFreeHeap(),
-                  heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+    if (freeHeap < 60000 || largest < 20000) {
+      Serial.println("🚨 [WARNING] Heap low — consider stopping scan or resetting!");
+    }
   }
-
-if (freeHeap < 60000 || largest < 20000) {
-  Serial.println("🚨 [WARNING] Heap low — consider stopping scan or resetting.");
 }
 
 

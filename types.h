@@ -59,6 +59,7 @@ struct MgmtInfo {
   String countryCode;
   String asciiHints;  // from unknown ASCII-looking IEs
   std::set<String> seenSsids;
+  int hiddenSsidCount = 0;
   wpsFingerprint wps;
   
 };
@@ -180,6 +181,7 @@ const VendorOUI vendorTable[] = {
   {{0x88, 0x32, 0x9B}, "SmsgTh"},
   {{0xA0, 0xD0, 0x5B}, "Smsung"},
   {{0x64, 0x1C, 0xAE}, "Smsung"},
+  {{0xCC, 0x6E, 0xA4}, "Smsung"}, //Samsung Electronics Co.,Ltd
   {{0xD8, 0x0D, 0x17}, "TpLink"},
   {{0xEC, 0x75, 0x0C}, "TpLink"},
   {{0x00, 0x1D, 0x0F}, "TpLink"},
@@ -268,9 +270,10 @@ const VendorOUI vendorTable[] = {
   {{0x10, 0x27, 0xF5}, "TPLink"}, //TP-Link Systems Inc
   {{0x70, 0xF1, 0x1C}, "ShenOg"}, //Shenzhen Ogemray Technology Co.,Ltd
   {{0xB8, 0x94, 0xE7}, "Xiaomi"}, //Xiaomi Communications Co Ltd
-//F4:7B:09 Intel Corporate
-//B0:52:16 Hon Hai Precision Ind. Co.,Ltd.
-//B4:4C:3B Zhejiang Dahua Technology Co., Ltd.
+  {{0xF4, 0x7B, 0x09}, "Intel"}, //Intel Corporate
+  {{0xB0, 0x52, 0x16}, "HonHai"}, //Hon Hai Precision Ind. Co.,Ltd.
+  {{0xB4, 0x4C, 0x3B}, "ZDahua"}, //Zhejiang Dahua Technology Co., Ltd.
+
 };
 
 const size_t vendorCount = sizeof(vendorTable) / sizeof(vendorTable[0]);
