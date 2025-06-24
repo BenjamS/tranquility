@@ -273,6 +273,8 @@ const VendorOUI vendorTable[] = {
   {{0xF4, 0x7B, 0x09}, "Intel"}, //Intel Corporate
   {{0xB0, 0x52, 0x16}, "HonHai"}, //Hon Hai Precision Ind. Co.,Ltd.
   {{0xB4, 0x4C, 0x3B}, "ZDahua"}, //Zhejiang Dahua Technology Co., Ltd.
+  {{0x6C, 0x22, 0x1A}, "AltoBm"}, //AltoBeam Inc.
+  {{0x90, 0xE8, 0x68}, "AzureW"}, //AzureWave Technology Inc.
 
 };
 

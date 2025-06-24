@@ -2029,7 +2029,7 @@ void parseMgmtIEs(const uint8_t* data, uint16_t len, DeviceCapture& cap) {
              tagData[2] == 0xF2 && tagData[3] == 0x04) {
       cap.mgmtInfo.wps = parseWpsIE(tagData + 4, tagLen - 4);
     }
-        // Country Code
+    // Country Code
     else if (id == 0x07 && tagLen >= 3) {
       String cc = "";
       for (int i = 0; i < 3; ++i) {
@@ -2389,7 +2389,7 @@ void debugPrintGlobalInfo(const DeviceCapture& cap) {
 void printMacStats() {
 
   Serial.println(F("\n📊 Device Summary After Scan"));
-  Serial.println(F("MAC(ven)                     Combos         Cty   Pkts   LenAvg/Std   Chs    RSSImin/max  First/Last (s)"));
+  Serial.println(F("MAC(ven)                     Combos              Cty   Pkts   LenAvg/Std   Chs    RSSImin/max  First/Last (s)"));
   Serial.println(F("---------------------------------------------------------------------------------------------------------"));
   int ephemeralProberCount = 0;
   for (const auto& kv : macStatsMap) {

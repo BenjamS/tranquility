@@ -73,7 +73,7 @@ void sniffer_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
     subtype == 0x02 ||  // Reassociation Request
     subtype == 0x04 ||  // Probe Request
     subtype == 0x0B ||  // Authentication
-    //cap.subtype == 0x08 ||  // Beacon
+    //subtype == 0x08 ||  // Beacon
     (subtype == 0x0C && dirCode == DIR_CLIENT_TO_AP) ||  // Deauthentication
     (subtype == 0x0A && dirCode == DIR_CLIENT_TO_AP)));  // Disassociation
   bool isDataFrame = (frameType == 0x02);
@@ -187,6 +187,10 @@ void sniffer_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
     if (cap.mgmtInfo.asciiHints.length()) {
       stats.mgmt.asciiHints = cap.mgmtInfo.asciiHints;
     } 
+
+    if (cap.mgmtInfo.countryCode.length()) {
+      stats.mgmt.countryCode = cap.mgmtInfo.countryCode;
+    }
 
   }
 
