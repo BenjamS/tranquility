@@ -159,7 +159,8 @@ void sniffer_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
     bool noSSID = ssid.length() == 0;
     //bool noVendor = (getVendorName(cap.senderMac).length() == 0);  // Or however you check vendor
     //bool shortDuration = cap.durationMs < 3;
-    if (isProbeRequest && noSSID) {
+    bool hasWps = cap.mgmtInfo.wps.wpsSumFxd.length() > 0;
+    if (isProbeRequest && noSSID && !hasWps) {
       ephemeralProbeCount++;  // ✅ Count but skip
      return;  // ❌ Don’t store in macStatsMap
     }

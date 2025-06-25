@@ -2593,7 +2593,7 @@ void printMacStats() {
     uint32_t first = stats.firstSeen / 1000;
     uint32_t last  = stats.lastSeen  / 1000;
 
-    // Set aside ephemeral probers to declutter table — unless they revealed an SSID
+    // Set aside ephemeral probers to declutter table — unless they revealed an SSID or @PS info
     comboStr.trim();
     if (vendor == "Unknwn" &&
         stats.packetCount <= 3 &&
@@ -2601,6 +2601,7 @@ void printMacStats() {
         (last - first <= 2) &&
         stats.rxMacSummaries.count("FF:FF:FF(BC)") &&
         stats.bssidSummaries.count("FF:FF:FF(Unknwn)") &&
+        stats.mgmt.wps.wpsSumFxd.length() == 0 &&
         stats.mgmt.seenSsids.empty()) {  // ← allow if we saw an SSID
       ephemeralProberCount++;
       continue;  // ✅ Don't print this device in the table
