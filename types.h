@@ -104,10 +104,15 @@ struct datFrameInfo {
   std::map<String, uint64_t> ipv4FlowBytesSqSum;
   
   std::map<String, std::set<String>> dnsHostnamesByFlow;
+  std::map<String, std::array<uint8_t, 16>> fullIp6SrcMap;
+  std::map<String, std::array<uint8_t, 16>> fullIp6DstMap;
+  //std::map<String, String> fullIp6SrcMap;
+  //std::map<String, String> fullIp6DstMap;
   // Key: "192.168.0.2 → 8.8.8.8"
   // Value: { "example.com", "google.com" }
-  std::set<uint32_t> targetMacSuffixes;  // Lower 24-bit MAC suffixes seen as targets (EUI-64 deduction)
-  std::set<String> eui64Macs;
+  //std::set<uint32_t> targetMacSuffixes;  // Lower 24-bit MAC suffixes seen as targets (EUI-64 deduction)
+  //std::set<String> eui64Macs;
+  //std::map<String, String> eui64FlowMap;  // Map from compressed IPv6 src IP → reconstructed EUI64 MAC
   // EAPOL
   EapolHandshakeDetail handshake;
   uint16_t eapolHandshakeCounts[5] = {0};
@@ -182,12 +187,14 @@ const VendorOUI vendorTable[] = {
   {{0xA0, 0xD0, 0x5B}, "Smsung"},
   {{0x64, 0x1C, 0xAE}, "Smsung"},
   {{0xCC, 0x6E, 0xA4}, "Smsung"}, //Samsung Electronics Co.,Ltd
+  {{0xD4, 0x11, 0xA3}, "Smsung"}, //Samsung Electronics Co.,Ltd
   {{0xD8, 0x0D, 0x17}, "TpLink"},
   {{0xEC, 0x75, 0x0C}, "TpLink"},
   {{0x00, 0x1D, 0x0F}, "TpLink"},
   {{0x00, 0x31, 0x92}, "TpLink"},
   {{0x14, 0xEB, 0xB6}, "TpLink"},
   {{0x48, 0x22, 0x54}, "TpLink"},
+  {{0xA8, 0x6E, 0x84}, "TPLink"}, //TP-Link Systems Inc
   {{0xA4, 0x77, 0x33}, "Google"},
   {{0x00, 0x11, 0x22}, "CIMSYS"},
   {{0xF0, 0x9F, 0xC2}, "Ubiqui"},
@@ -268,21 +275,21 @@ const VendorOUI vendorTable[] = {
   {{0xA8, 0x31, 0x62}, "HHNTec"}, //Hangzhou Huacheng Network Technology Co.,Ltd
   {{0x28, 0x56, 0x3A}, "Fibhom"}, //Fiberhome Telecommunication Technologies Co.,LTD
   {{0x10, 0x27, 0xF5}, "TPLink"}, //TP-Link Systems Inc
-  {{0x70, 0xF1, 0x1C}, "ShenOg"}, //Shenzhen Ogemray Technology Co.,Ltd
+  {{0x70, 0xF1, 0x1C}, "ShzOge"}, //Shenzhen Ogemray Technology Co.,Ltd
   {{0xB8, 0x94, 0xE7}, "Xiaomi"}, //Xiaomi Communications Co Ltd
   {{0xF4, 0x7B, 0x09}, "Intel"}, //Intel Corporate
+  {{0x98, 0x5F, 0x41}, "Intel"}, //Intel Corporate
   {{0xB0, 0x52, 0x16}, "HonHai"}, //Hon Hai Precision Ind. Co.,Ltd.
   {{0xB4, 0x4C, 0x3B}, "ZDahua"}, //Zhejiang Dahua Technology Co., Ltd.
   {{0x6C, 0x22, 0x1A}, "AltoBm"}, //AltoBeam Inc.
   {{0x90, 0xE8, 0x68}, "AzureW"}, //AzureWave Technology Inc.
-  //20:F4:78 Xiaomi Communications Co Ltd
-  //7C:B3:7B Qingdao Intelligent&Precise Electronics Co.,Ltd.
-//10:59:32 Roku, Inc
-//98:5F:41 Intel Corporate
-//34:21:09 Jensen Scandinavia AS
-//D4:11:A3 Samsung Electronics Co.,Ltd
-//F0:C8:14 Shenzhen Bilian Electronic Co.，Ltd
-//F4:7B:09 Intel Corporate
+  {{0x20, 0xF4, 0x78}, "Xiaomi"}, //20:F4:78 Xiaomi Communications Co Ltd
+  {{0x7C, 0xB3, 0x7B}, "Qngdao"}, //7C:B3:7B Qingdao Intelligent&Precise Electronics Co.,Ltd.
+  {{0x10, 0x59, 0x32}, "Roku"}, //Roku, Inc
+  {{0x34, 0x21, 0x09}, "AzureW"}, //34:21:09 Jensen Scandinavia AS
+  {{0xF0, 0xC8, 0x14}, "ShzBil"}, //F0:C8:14 Shenzhen Bilian Electronic Co.，Ltd
+  {{0x33, 0x33, 0x00}, "mDNS6"}, //IPv6 mDNS
+  {{0x01, 0x00, 0x5E}, "MC4"}, //IPv4 Multicast
 
 };
 
