@@ -275,6 +275,14 @@ const VendorOUI vendorTable[] = {
   {{0xB4, 0x4C, 0x3B}, "ZDahua"}, //Zhejiang Dahua Technology Co., Ltd.
   {{0x6C, 0x22, 0x1A}, "AltoBm"}, //AltoBeam Inc.
   {{0x90, 0xE8, 0x68}, "AzureW"}, //AzureWave Technology Inc.
+  //20:F4:78 Xiaomi Communications Co Ltd
+  //7C:B3:7B Qingdao Intelligent&Precise Electronics Co.,Ltd.
+//10:59:32 Roku, Inc
+//98:5F:41 Intel Corporate
+//34:21:09 Jensen Scandinavia AS
+//D4:11:A3 Samsung Electronics Co.,Ltd
+//F0:C8:14 Shenzhen Bilian Electronic Co.，Ltd
+//F4:7B:09 Intel Corporate
 
 };
 
