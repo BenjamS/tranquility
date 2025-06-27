@@ -3,6 +3,7 @@
 #include <Arduino.h>
 #include <set>
 #include <map>
+#include <vector>
 
 // ---------------- ENUM ----------------
 enum FrameDirection : uint8_t {
@@ -24,6 +25,14 @@ enum EapolMsgType {
 const char* directionToStr(FrameDirection dir);
 
 // ---------------- STRUCTS ----------------
+
+struct Dhcpv6Info {
+  String msgType;   // e.g. "SOLICIT"
+  String mac;       // Parsed from DUID
+  String hostname;  // FQDN if present
+  String timestamp; // Parsed DUID-LLT time
+  String vendor;    // Vendor Class option
+};
 
 struct FrameStatKey {
   uint8_t type;
@@ -78,6 +87,20 @@ struct EapolHandshakeDetail {
   uint64_t replayCounter = 0;
 };
 
+struct SsdpDevice {
+  String ip;
+  String deviceName;  // parsed from ST or USN
+  String server;
+  String location;
+  String st;
+  String usn;
+
+  // For deduplication
+  bool operator<(const SsdpDevice& other) const {
+    return usn < other.usn;  // or combine with IP if needed
+  }
+};
+
 struct datFrameInfo {
 
   uint32_t qosUpCount = 0, qosDownCount = 0;
@@ -116,6 +139,14 @@ struct datFrameInfo {
   // EAPOL
   EapolHandshakeDetail handshake;
   uint16_t eapolHandshakeCounts[5] = {0};
+
+  std::vector<Dhcpv6Info> dhcpv6Entries;
+  std::set<String> seenDhcpv6Keys;
+  std::set<String> seenTxtKeys;
+
+  std::set<SsdpDevice> ssdpDevices;           // for summary
+  std::set<String> seenSsdpKeys;              // for deduplication
+
 };
 
 struct DeviceCapture {
@@ -173,6 +204,9 @@ struct VendorOUI {
 };
 
 const VendorOUI vendorTable[] = {
+  {{0x33, 0x33, 0x00}, "mDNS6"}, //IPv6 mDNS
+  {{0x01, 0x00, 0x5E}, "MC4"}, //IPv4 Multicast
+  {{0xFF, 0xFF, 0xFF}, "BC"}, //Broadcast
   {{0xFC, 0xFC, 0x48}, "Apple"},
   {{0x00, 0x17, 0xF2}, "Apple"},
   {{0x30, 0xE0, 0x4F}, "Apple"},
@@ -194,6 +228,7 @@ const VendorOUI vendorTable[] = {
   {{0x00, 0x31, 0x92}, "TpLink"},
   {{0x14, 0xEB, 0xB6}, "TpLink"},
   {{0x48, 0x22, 0x54}, "TpLink"},
+  {{0xA8, 0x6E, 0x84}, "TPLink"}, //TP-Link Systems Inc
   {{0xA8, 0x6E, 0x84}, "TPLink"}, //TP-Link Systems Inc
   {{0xA4, 0x77, 0x33}, "Google"},
   {{0x00, 0x11, 0x22}, "CIMSYS"},
@@ -288,9 +323,13 @@ const VendorOUI vendorTable[] = {
   {{0x10, 0x59, 0x32}, "Roku"}, //Roku, Inc
   {{0x34, 0x21, 0x09}, "AzureW"}, //34:21:09 Jensen Scandinavia AS
   {{0xF0, 0xC8, 0x14}, "ShzBil"}, //F0:C8:14 Shenzhen Bilian Electronic Co.，Ltd
-  {{0x33, 0x33, 0x00}, "mDNS6"}, //IPv6 mDNS
-  {{0x01, 0x00, 0x5E}, "MC4"}, //IPv4 Multicast
-
+  {{0x00, 0x08, 0x22}, "InPro"}, //00:08:22 InPro Comm
+  {{0x54, 0xBA, 0xD6}, "Huawei"}, //54:BA:D6 Huawei Technologies Co.,Ltd
+  {{0x60, 0x23, 0xA4}, "SchnAI"}, //60:23:A4 Sichuan AI-Link Technology Co., Ltd.
+  {{0x7C, 0xFC, 0x3C}, "Viston"}, //7C:FC:3C Visteon Corporation
+  {{0x24, 0x46, 0xC8}, "Motrla"}, //24:46:C8 Motorola Mobility LLC, a Lenovo Company
+// 04:CF:4B Intel Corporate 
+//C4:3C:B0 Shenzhen Bilian Electronic Co.，Ltd
 };
 
 const size_t vendorCount = sizeof(vendorTable) / sizeof(vendorTable[0]);
