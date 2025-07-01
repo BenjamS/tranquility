@@ -23,6 +23,94 @@ void parseSsdpPayload(const uint8_t* payload, size_t len, const char* srcIp, con
   const char* data = (const char*)payload;
   const char* end = data + len;
 
+  // Quick check: SSDP should look like HTTP/1.1 NOTIFY or M-SEARCH
+  if (len < 10 || (!strstr(data, "HTTP") && !strstr(data, "NOTIFY") && !strstr(data, "M-SEARCH"))) return;
+
+  String server, location, st, usn;
+  const char* line = data;
+
+  while (line < end) {
+    const char* next = strchr(line, '\n');
+    if (!next) break;
+
+    String l = String(line, next - line);
+    l.trim();
+
+    String lUpper = l;
+    lUpper.toUpperCase();
+
+    if (lUpper.startsWith("SERVER:")) {
+      String temp = l.substring(7);
+      temp.trim();
+      server = temp;
+    }
+    else if (lUpper.startsWith("LOCATION:")) {
+      String temp = l.substring(9);
+      temp.trim();
+      location = temp;
+    }
+    else if (lUpper.startsWith("ST:")) {
+      String temp = l.substring(3);
+      temp.trim();
+      st = temp;
+    }
+    else if (lUpper.startsWith("NT:")) {  // NT is sometimes used in NOTIFY
+      String temp = l.substring(3);
+      temp.trim();
+      if (st.length() == 0) st = temp;
+    }
+    else if (lUpper.startsWith("USN:")) {
+      String temp = l.substring(4);
+      temp.trim();
+      usn = temp;
+    }
+
+    line = next + 1;
+  }
+
+  if (usn.length() == 0 && st.length() == 0) return;
+
+  // Deduplicate
+  String key = usn + "|" + location;
+  if (df.seenSsdpKeys.count(key)) return;
+  df.seenSsdpKeys.insert(key);
+
+  // 🔍 Heuristic device naming
+  String deviceName;
+  String stLower = st;
+  stLower.toLowerCase();
+
+  if (stLower.indexOf("roku") >= 0) deviceName = "Roku Device";
+  else if (stLower.indexOf("sonos") >= 0) deviceName = "Sonos Speaker";
+  else if (stLower.indexOf("mediarenderer") >= 0) deviceName = "Media Renderer";
+  else if (stLower.indexOf("printer") >= 0) deviceName = "Network Printer";
+  else if (server.indexOf("LG") >= 0) deviceName = "LG Smart Device";
+  else if (server.indexOf("Linux") >= 0) deviceName = "Generic Linux UPnP";
+  else if (st.length()) deviceName = st;
+  else deviceName = usn;
+
+  // 📦 Store result
+  SsdpDevice dev;
+  dev.ip = srcIp;
+  dev.deviceName = deviceName;
+  dev.server = server;
+  dev.location = location;
+  dev.st = st;
+  dev.usn = usn;
+
+  df.ssdpDevices.insert(dev);
+
+  // Optional Debug Output
+  Serial.printf("📣 SSDP Detected: %-20s | USN: %-30s | Location: %s\n",
+                deviceName.c_str(), usn.c_str(), location.c_str());
+}
+
+/*
+void parseSsdpPayload(const uint8_t* payload, size_t len, const char* srcIp, const char* dstIp,
+                      const char* flowKey, datFrameInfo& df) {
+  const char* data = (const char*)payload;
+  const char* end = data + len;
+
   // Defensive check: look for something that begins like HTTP
   if (len < 10 || !strstr(data, "HTTP")) return;
 
@@ -88,7 +176,7 @@ void parseSsdpPayload(const uint8_t* payload, size_t len, const char* srcIp, con
 
   df.ssdpDevices.insert(dev);
 }
-
+*/
 
 Dhcpv6Info parseDhcpv6(const uint8_t* udpPayload, size_t udpLen, const uint8_t* end) {
   Dhcpv6Info info;
@@ -693,7 +781,7 @@ void printFlowSummary(
       // Check if it's a valid EUI-64 address
       if (isLikelyEui64(ip.data())) {
         hasEui64Tag = true;
-        String mac = extractMacFromEUI64(ip.data());
+        String mac = extractMacFromEUI64(ip.data() + 8);
         extraInfo += " 🧬 EUI64=" + mac;
       }
     }
@@ -1460,6 +1548,39 @@ void parseUnknownAsciiIe(uint8_t tagId, const uint8_t* tagData, uint8_t tagLen, 
   Serial.printf("  🔍 [ASCII Tag] 0x%02X (%3d): \"%s\"\n", tagId, tagId, result.c_str());
 }
 
+
+void extractSsid(const uint8_t* payload, int len, String& out) {
+  out = "";
+
+  int offset = 0;
+  while (offset + 2 <= len) {
+    uint8_t id = payload[offset];
+    uint8_t tagLen = payload[offset + 1];
+
+    // Validate tag length
+    if (offset + 2 + tagLen > len) break;
+
+    // Stop if we hit vendor-specific IEs (WPS etc.)
+    if (id == 0xDD) break;
+
+    // Handle SSID tag (ID 0)
+    if (id == 0 && tagLen <= 32) {
+      if (tagLen == 0) return;
+
+      out.reserve(tagLen);
+      for (int i = 0; i < tagLen; ++i) {
+        char c = payload[offset + 2 + i];
+        if (c >= 32 && c <= 126) {
+          out += c;
+        }
+      }
+      return;
+    }
+
+    offset += 2 + tagLen;
+  }
+}
+/*
 void extractSsid(const uint8_t* payload, int len, String& out) {
   out = "";
   int offset = 0;
@@ -1483,7 +1604,7 @@ void extractSsid(const uint8_t* payload, int len, String& out) {
     offset += 2 + tagLen;
   }
 }
-
+*/
 /*
 String extractSsid(const uint8_t* payload, int len) {
   int offset = 0;
@@ -2126,106 +2247,6 @@ if (etherType == 0x0800 && payloadLen >= 20) {
         ptr += 4;
       }
 
-/*
-      // Parse Answers
-      for (int i = 0; i < anCount && ptr + 10 < end; ++i) {
-        char name[128];
-        decodeDnsName(base, ptr, end, name, sizeof(name));
-        //ptr += 2;
-        if (ptr + 10 > end) {
-          Serial.println("-----------------[WARN] DNS record too short to read type/class/length safely.");
-          break;
-        }
-        uint16_t type        = (ptr[0] << 8) | ptr[1];
-        uint16_t classField  = (ptr[2] << 8) | ptr[3];
-        bool cacheFlush      = classField & 0x8000;
-        uint16_t dnsClass    = classField & 0x7FFF;
-  	    Serial.printf("---------------------[DNS] Record type = %u (%s), class = 0x%04X%s, name: %s\n",
-              type, dnsTypeToString(type), classField,
-              cacheFlush ? " [flush]" : "", name);
-        if (type > 50 || dnsTypeToString(type) == "UNKNOWN") {
-          Serial.printf("-------------------⚠️  Unknown DNS record type: %u (0x%04X), name: %s, class=0x%04X\n",
-                  type, type, name, classField);
-        }
-        uint16_t dataLen = (ptr[8] << 8) | ptr[9];
-        Serial.println("[DEBUG] Record start (next 32 bytes):");
-        hexDump(ptr, 32);  // dump the next 32 bytes from current position
-        ptr += 10;
-
-        if (ptr + dataLen > end) break;
-
-      // 🌐 Log values
-      if (type == 1 && dataLen == 4) {  // A Record
-        char ipStr[16];
-        ipToString(ptr, ipStr, sizeof(ipStr));
-        Serial.printf("📥 A Record: %s → %s\n", name, ipStr);
-        stats.df.ipv4Addrs.insert(ipStr);  // ✅ Log IP
-      }
-      else if (type == 12) {  // PTR Record
-        char ptrName[128];
-        decodeDnsName(base, ptr, end, ptrName, sizeof(ptrName));
-        Serial.printf("🔁 PTR Record: %s → %s\n", name, ptrName);
-        String tagged = (isMdns ? "mDNS: " : "DNS: ") + String(ptrName);
-        stats.df.dnsHostnames.insert(tagged);
-        snprintf(flowKey, sizeof(flowKey), "%s → %s (%s)", srcIp, dstIp, label);
-        stats.df.dnsHostnamesByFlow[flowKey].insert(tagged);
-      }
-      else if (type == 16) {  // TXT Record
-        Serial.printf("📝 TXT Record: %s\n", name);
-        String taggedBase = (isMdns ? "mDNS TXT: " : "DNS TXT: ") + String(name);
-
-        const uint8_t* txt = ptr;
-        const uint8_t* txtEnd = ptr + dataLen;
-        if (txt == txtEnd) Serial.println("[TXT] No fields found");
-
-        while (txt < txtEnd) {
-          uint8_t len = *txt++;
-          if (txt + len > txtEnd || len == 0) break;
-
-          char field[128] = {0};
-          memcpy(field, txt, len);
-          field[len] = '\0';
-
-          String taggedField = taggedBase + " → " + String(field);
-          stats.df.dnsHostnames.insert(taggedField);
-          snprintf(flowKey, sizeof(flowKey), "%s → %s (%s)", srcIp, dstIp, label);
-          stats.df.dnsHostnamesByFlow[flowKey].insert(taggedField);
-          Serial.printf("🔎 TXT Field: %s\n", field);
-
-          txt += len;
-        }
-      }
-      else if (type == 28 && dataLen == 16) {  // AAAA Record
-        Serial.printf("[DEBUG] AAAA record dataLen: %u\n", dataLen);
-        char ip6Str[40];
-        formatIPv6Short(ptr, ip6Str, sizeof(ip6Str));  // you likely already have formatIPv6Short()
-        Serial.printf("🌐 AAAA Record: %s → %s\n", name, ip6Str);
-        stats.df.dnsHostnames.insert((isMdns ? "mDNS AAAA: " : "DNS AAAA: ") + String(name));
-        stats.df.ipv6Flows["AAAA: " + String(name) + " → " + ip6Str]++;
-      }
-      else if (type == 33 && dataLen >= 6) {  // SRV Record
-        uint16_t priority = (ptr[0] << 8) | ptr[1];
-        uint16_t weight   = (ptr[2] << 8) | ptr[3];
-        uint16_t port     = (ptr[4] << 8) | ptr[5];
-        const uint8_t* target = ptr + 6;
-        Serial.printf("[DEBUG] SRV: raw target: %02X %02X ...\n", target[0], target[1]);
-
-        char targetName[128];
-        decodeDnsName(base, target, end, targetName, sizeof(targetName));
-
-        Serial.printf("🛰️ SRV Record: %s:%u (priority=%u weight=%u)\n",
-                targetName, port, priority, weight);
-
-        String hostLabel = String(isMdns ? "mDNS SRV: " : "DNS SRV: ") +
-                 String(name) + " → " + String(targetName) + ":" + port;
-        stats.df.dnsHostnames.insert(hostLabel);
-        snprintf(flowKey, sizeof(flowKey), "%s → %s (%s)", srcIp, dstIp, label);
-        stats.df.dnsHostnamesByFlow[flowKey].insert(hostLabel);
-      }
-
-      ptr += dataLen;
-    }
-*/
 // Parse Answers
 for (int i = 0; i < anCount && ptr + 10 < end; ++i) {
   char name[128];
@@ -2377,32 +2398,6 @@ else if (etherType == 0x86DD && payloadLen >= 40) {
   char srcIp[64], dstIp[64], flowKey[128];
   const char* label = "IPv6/Other";
 
-  // Detect solicited-node multicast targets
-  /*
-  std::set<uint32_t>& targetSuffixes = stats.df.targetMacSuffixes;
-  if (dstIp[0] == 'F' && dstIp[1] == 'F' && strstr(dstIp, "::1:FF")) {
-    // Extract last 3 bytes from address suffix
-    const char* lastColon = strrchr(dstIp, ':');
-    if (lastColon) {
-      uint8_t b1 = strtoul(lastColon + 1, nullptr, 16);
-      const char* midColon = lastColon - 3;
-      while (*midColon != ':' && midColon > dstIp) --midColon;
-      uint8_t b2 = strtoul(midColon + 1, nullptr, 16);
-      midColon -= 3;
-      while (*midColon != ':' && midColon > dstIp) --midColon;
-      uint8_t b3 = strtoul(midColon + 1, nullptr, 16);
-      uint32_t suffix = (b3 << 16) | (b2 << 8) | b1;
-      targetSuffixes.insert(suffix);
-    }
-  }
-  // 🧬 MAC recovery from EUI-64
-  //if (isLikelyEui64(ip6 + 8)) {
-  //  String recoveredMac = extractMacFromEUI64(ip6 + 8);
-  //  stats.df.eui64Macs.insert(recoveredMac);
-  //  Serial.println("🧬 EUI-64 detected. MAC reconstructed: " + recoveredMac);
-  //}
-*/
-
   // Skip extension headers
   while ((nextHeader == 0 || nextHeader == 43 || nextHeader == 60 || nextHeader == 51 || nextHeader == 50) &&
          offset + 8 < payloadLen) {
@@ -2552,11 +2547,6 @@ if (dstPort == 5353 || srcPort == 5353) {
   memcpy(dstAddr.data(), ip6 + 24, 16);
   stats.df.fullIp6SrcMap[flowKey] = srcAddr;
   stats.df.fullIp6DstMap[flowKey] = dstAddr;
-
-  //char srcIpStr[40];
-  //compressIPv6RFC5952(srcAddr.data(), srcIpStr, sizeof(srcIpStr));
-  //stats.df.fullIp6SrcMap[flowKey] = String(srcIpStr);
-
 
 }
 

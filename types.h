@@ -207,6 +207,7 @@ const VendorOUI vendorTable[] = {
   {{0x33, 0x33, 0x00}, "mDNS6"}, //IPv6 mDNS
   {{0x01, 0x00, 0x5E}, "MC4"}, //IPv4 Multicast
   {{0xFF, 0xFF, 0xFF}, "BC"}, //Broadcast
+  {{0x01, 0x80, 0xC2}, "SpanTr"}, // 01:80:C2 (Spanning Tree)
   {{0xFC, 0xFC, 0x48}, "Apple"},
   {{0x00, 0x17, 0xF2}, "Apple"},
   {{0x30, 0xE0, 0x4F}, "Apple"},
@@ -286,8 +287,10 @@ const VendorOUI vendorTable[] = {
   {{0x00, 0x03, 0x7F}, "Athros"},
   {{0x34, 0x21, 0x09}, "Jensen"},
   {{0xEC, 0x6C, 0x9A}, "Arcady"},
+  {{0x18, 0x82, 0x8C}, "Arcady"}, //Arcadyan Corporation
   {{0x5C, 0x7B, 0x5C}, "Shenzn"},
   {{0x2C, 0xEC, 0xF7}, "Shenzn"},
+  {{0xC4, 0x3C, 0xB0}, "ShenZn"}, //Shenzhen Bilian Electronic Co.，Ltd
   {{0x08, 0xAA, 0x55}, "Motrla"},
   {{0x54, 0x27, 0x58}, "Motrla"},
   {{0x00, 0xBD, 0x3E}, "Vizio"},
@@ -314,6 +317,7 @@ const VendorOUI vendorTable[] = {
   {{0xB8, 0x94, 0xE7}, "Xiaomi"}, //Xiaomi Communications Co Ltd
   {{0xF4, 0x7B, 0x09}, "Intel"}, //Intel Corporate
   {{0x98, 0x5F, 0x41}, "Intel"}, //Intel Corporate
+  {{0x04, 0xCF, 0x4B}, "Intel"}, //Intel Corporate
   {{0xB0, 0x52, 0x16}, "HonHai"}, //Hon Hai Precision Ind. Co.,Ltd.
   {{0xB4, 0x4C, 0x3B}, "ZDahua"}, //Zhejiang Dahua Technology Co., Ltd.
   {{0x6C, 0x22, 0x1A}, "AltoBm"}, //AltoBeam Inc.
@@ -328,8 +332,9 @@ const VendorOUI vendorTable[] = {
   {{0x60, 0x23, 0xA4}, "SchnAI"}, //60:23:A4 Sichuan AI-Link Technology Co., Ltd.
   {{0x7C, 0xFC, 0x3C}, "Viston"}, //7C:FC:3C Visteon Corporation
   {{0x24, 0x46, 0xC8}, "Motrla"}, //24:46:C8 Motorola Mobility LLC, a Lenovo Company
-// 04:CF:4B Intel Corporate 
-//C4:3C:B0 Shenzhen Bilian Electronic Co.，Ltd
+  {{0xB0, 0x95, 0x75}, "TpLink"}, //Tp-Link Technologies Co.,Ltd.
+  {{0xE4, 0x55, 0xA8}, "CiscoM"}, //E4:55:A8 Cisco Meraki
+//38:F9:F5 Garmin International
 };
 
 const size_t vendorCount = sizeof(vendorTable) / sizeof(vendorTable[0]);

@@ -8,8 +8,8 @@
 #include "nvs_flash.h"
 
 // ---- USER CONFIG ----
-const unsigned long SCAN_DURATION   = 30000;  // 30 seconds per scan
-const unsigned long SLEEP_DURATION  = 60000;  // 60 seconds sleep
+const unsigned long SCAN_DURATION   = 10000;  // 1000 = 1 sec
+const unsigned long SLEEP_DURATION  = 40000;  // 1000 = 1 sec
 const int           MAX_DEVICES     = 100;    // Max devices tracked
 const int           CHANNELS[]      = {1, 6, 11};
 const int           CHANNEL_COUNT   = sizeof(CHANNELS) / sizeof(CHANNELS[0]);
@@ -85,12 +85,14 @@ void sniffer_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
   parseGlobalItems(ppkt, cap);
   //debugPrintGlobalInfo(cap); // [DEBUG] See if parseGlobalItems() successfully captured everything it's supposed to
   //Serial.printf("[DEBUG] type: %02X, subtype: %02X, dir: %d\n", fType, subtype, direction);
-  updateMacStatsFromGlobalItems(cap);
+  //updateMacStatsFromGlobalItems(cap);
+  //----------------------------------------------------------------
   // Type 2 frames (QoS and non-QoS data frames)
   if(isDataFrame){ 
-    Serial.printf("[FRAME] type: %02X, subtype: %02X, dir: %s\n", cap.frameType, cap.subtype, cap.directionText);
+    Serial.printf("[DATA FRAME] type: %02X, subtype: %02X, dir: %s\n", cap.frameType, cap.subtype, cap.directionText);
     Serial.println("Sender MAC: " + cap.senderMac);
     //hexDump(ppkt->payload, ppkt->rx_ctrl.sig_len);
+    updateMacStatsFromGlobalItems(cap);
     parseDataFrame(ppkt->payload, ppkt->rx_ctrl.sig_len, cap);
   }
   //-------------------------------------------------------------
@@ -107,16 +109,35 @@ void sniffer_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
     case 0x04: {  // Probe Request
       // Start from base MAC header (24 bytes)
       offset = 24;
-      // Scan forward for the first valid tag
-      while (offset + 2 < ppkt->rx_ctrl.sig_len) {
-        uint8_t tag = ppkt->payload[offset];
-        uint8_t len = ppkt->payload[offset + 1];
-        if ((tag <= 0x7F || tag == 0xDD) && (offset + 2 + len <= ppkt->rx_ctrl.sig_len)) {
-          break;  // Found valid tag-length pair
-        }
-        offset++;
+
+      // Defensive check: make sure there’s room for at least one TLV
+      if (offset + 2 > ppkt->rx_ctrl.sig_len) {
+        ephemeralProbeCount++;
+        return;
+      }
+
+      // Calculate remaining length for IEs
+      int ieLen = ppkt->rx_ctrl.sig_len - offset;
+      if (ieLen <= 0) {
+        ephemeralProbeCount++;
+        return;
       }
       break;
+      //bool foundValidTag = false;
+      // Scan forward for the first valid tag
+      //while (offset + 2 < ppkt->rx_ctrl.sig_len) {
+      //  uint8_t tag = ppkt->payload[offset];
+      //  uint8_t len = ppkt->payload[offset + 1];
+      //  if ((tag <= 0x7F || tag == 0xDD) && (offset + 2 + len <= ppkt->rx_ctrl.sig_len)) {
+      //      foundValidTag = true;
+      //      break;
+      //  }
+      //  offset++;
+      //}
+      //if (!foundValidTag) {
+      //  ephemeralProbeCount++;
+      //  return;
+      //}
     }
     case 0x00:  // Association Request
     case 0x01:  // Association Response
@@ -129,6 +150,12 @@ void sniffer_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
     return;
     }
     int ieLen = ppkt->rx_ctrl.sig_len - offset;
+    if (ieLen <= 0) {
+      if (frameType == 0 && subtype == 0x04) {
+        ephemeralProbeCount++;
+      }
+      return;  // Always bail if IEs are invalid
+    }
     const uint8_t* ieData = ppkt->payload + offset;
     // [DEBUG]--------------
     if(cap.subtype == 0x04){
@@ -138,7 +165,7 @@ void sniffer_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
     //Serial.printf("[DEBUG] sig_len=%d, offset=%d, ieLen=%d\n", ppkt->rx_ctrl.sig_len, offset, ieLen);
     //printIEsDebug(ieData, ieLen);
     //hexDump(ppkt->payload, ppkt->rx_ctrl.sig_len);
-  //String ssid = extractSsid(ieData, ieLen);
+    //String ssid = extractSsid(ieData, ieLen);
     //if (ssid.length()) {
       //cap.mgmtInfo.ssid = ssid;
       //Serial.println("📶 [SSID] Extracted (extractSsid): \"" + ssid + "\"");
@@ -155,6 +182,10 @@ void sniffer_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
     static String ssid;
     ssid = "";  // clear it before reuse
     extractSsid(ieData, ieLen, ssid);
+    if (ssid == "@ " || ssid == "@#") {
+        Serial.println("[DEBUG] Suspicious SSID '@ ' detected from MAC: " + cap.senderMac);
+        hexDump(ppkt->payload, ppkt->rx_ctrl.sig_len);  // Print the whole raw frame
+    }
     bool isProbeRequest = (frameType == 0 && subtype == 0x04);
     bool noSSID = ssid.length() == 0;
     bool noWPS = cap.mgmtInfo.wps.wpsSumFxd.length() == 0;
@@ -164,6 +195,9 @@ void sniffer_callback(void *buf, wifi_promiscuous_pkt_type_t type) {
       ephemeralProbeCount++;  // ✅ Count but skip
      return;  // ❌ Don’t store in macStatsMap
     }
+    Serial.printf("[MGMT FRAME] type: %02X, subtype: %02X, dir: %s\n", cap.frameType, cap.subtype, cap.directionText);
+    Serial.println("Sender MAC: " + cap.senderMac);
+    updateMacStatsFromGlobalItems(cap);
     if (ssid.length()) {
       cap.mgmtInfo.ssid = ssid;
       Serial.println("📶 [SSID] Extracted (extractSsid): \"" + ssid + "\"");
