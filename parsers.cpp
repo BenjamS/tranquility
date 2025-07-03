@@ -2040,7 +2040,7 @@ void parseDataFrame(const uint8_t* frame, uint16_t len, const DeviceCapture& cap
   }
 
   // --------------------- EAPOL ---------------------
-  if (etherType == 0x888E && payloadLen >= 100) {
+  if (etherType == 0x888E && payloadLen >= 60) {
     uint8_t type = payload[1];
     if (type == 3) {
 
@@ -2082,12 +2082,14 @@ else if (mic && !install && !ack && pairwise) {
 }
 else if (mic && install && !ack && !pairwise) {
   Serial.println("🔁 Group Key Handshake (1/2) — GTK Install");
+  msgType = EAPOL_GROUP_MSG_1_2;
 }
 else if (mic && !install && !ack && !pairwise) {
   Serial.println("✅ Group Key Handshake (2/2) — Client ACK");
+  msgType = EAPOL_GROUP_MSG_2_2;
 }
      
-      const char* msgLabel[] = {"Unknown", "1/4", "2/4", "3/4", "4/4"};
+      const char* msgLabel[] = {"Unknown", "1/4", "2/4", "3/4", "4/4", "G-1/2", "G-2/2"};
       Serial.printf("📡 WPA Handshake Detected: Msg %s\n", msgLabel[msgType]);
 
       stats.df.eapolHandshakeCounts[msgType]++;

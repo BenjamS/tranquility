@@ -19,7 +19,9 @@ enum EapolMsgType {
   EAPOL_MSG_1_4,
   EAPOL_MSG_2_4,
   EAPOL_MSG_3_4,
-  EAPOL_MSG_4_4
+  EAPOL_MSG_4_4,
+  EAPOL_GROUP_MSG_1_2,
+  EAPOL_GROUP_MSG_2_2  
 };
 
 const char* directionToStr(FrameDirection dir);
@@ -335,6 +337,21 @@ const VendorOUI vendorTable[] = {
   {{0xB0, 0x95, 0x75}, "TpLink"}, //Tp-Link Technologies Co.,Ltd.
   {{0xE4, 0x55, 0xA8}, "CiscoM"}, //E4:55:A8 Cisco Meraki
 //38:F9:F5 Garmin International
+//5C:80:B6 Intel Corporate
+//C8:58:C0 Intel Corporate
+//98:FC:11 Cisco-Linksys, LLC
+//60:AB:67 Xiaomi Communications Co Ltd
+//F0:B6:1E Intel Corporate
+//14:F6:D8 Intel Corporate
+//14:75:5B Intel Corporate
+//70:CD:0D Intel Corporate
+//A8:81:7E Apple, Inc.
+//C4:14:11 Apple, Inc.
+//60:0F:6B Apple, Inc.
+//70:DF:2F Cisco Systems, Inc
+//E8:FB:1C AzureWave Technology Inc.
+//D0:21:F9 Ubiquiti Inc
+//FC:EC:DA Ubiquiti Inc
 };
 
 const size_t vendorCount = sizeof(vendorTable) / sizeof(vendorTable[0]);
