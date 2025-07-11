@@ -218,6 +218,13 @@ const VendorOUI vendorTable[] = {
   {{0x90, 0x72, 0x40}, "Apple"},
   {{0x00, 0x03, 0x93}, "Apple"},
   {{0xF8, 0x42, 0x88}, "Apple"},
+  {{0xA8, 0x81, 0x7E}, "Apple"}, //A8:81:7E Apple, Inc.
+  {{0xC4, 0x14, 0x11}, "Apple"}, //C4:14:11 Apple, Inc.
+  {{0x60, 0x0F, 0x6B}, "Apple"}, //60:0F:6B Apple, Inc.
+  {{0xA4, 0xC3, 0x37}, "Apple"}, //A4:C3:37 Apple, Inc.
+  {{0x30, 0x10, 0xE4}, "Apple"}, //30:10:E4 Apple, Inc.
+  {{0x50, 0xDE, 0x06}, "Apple"}, //50:DE:06 Apple, Inc.
+  {{0xD0, 0x6B, 0x78}, "Apple"}, //D0:6B:78 Apple, Inc.
   {{0xDC, 0xA6, 0x32}, "RaspPi"},
   {{0x00, 0x1A, 0x11}, "Google"},
   {{0x88, 0x32, 0x9B}, "SmsgTh"},
@@ -225,6 +232,7 @@ const VendorOUI vendorTable[] = {
   {{0x64, 0x1C, 0xAE}, "Smsung"},
   {{0xCC, 0x6E, 0xA4}, "Smsung"}, //Samsung Electronics Co.,Ltd
   {{0xD4, 0x11, 0xA3}, "Smsung"}, //Samsung Electronics Co.,Ltd
+  {{0x1C, 0xAF, 0x4A}, "Samsng"}, //1C:AF:4A Samsung Electronics Co.,Ltd
   {{0xD8, 0x0D, 0x17}, "TpLink"},
   {{0xEC, 0x75, 0x0C}, "TpLink"},
   {{0x00, 0x1D, 0x0F}, "TpLink"},
@@ -233,15 +241,22 @@ const VendorOUI vendorTable[] = {
   {{0x48, 0x22, 0x54}, "TpLink"},
   {{0xA8, 0x6E, 0x84}, "TPLink"}, //TP-Link Systems Inc
   {{0xA8, 0x6E, 0x84}, "TPLink"}, //TP-Link Systems Inc
+  {{0xB0, 0x95, 0x75}, "TpLink"}, //Tp-Link Technologies Co.,Ltd.
+  {{0x10, 0x27, 0xF5}, "TPLink"}, //TP-Link Systems Inc
   {{0xA4, 0x77, 0x33}, "Google"},
   {{0x00, 0x11, 0x22}, "CIMSYS"},
   {{0xF0, 0x9F, 0xC2}, "Ubiqui"},
   {{0x00, 0x15, 0x6D}, "Ubiqui"},
+  {{0xD0, 0x21, 0xF9}, "Ubiqui"}, //D0:21:F9 Ubiquiti Inc
+  {{0xFC, 0xEC, 0xDA}, "Ubiqui"}, //FC:EC:DA Ubiquiti Inc
   {{0x3C, 0x5A, 0xB4}, "Google"},
   {{0x00, 0x50, 0xF2}, "Micsft"},
   {{0x00, 0x15, 0x5D}, "Micsft"},
   {{0x00, 0x1D, 0xD8}, "Micsft"},
   {{0xAC, 0x18, 0x26}, "Cisco"},
+  {{0xE4, 0x55, 0xA8}, "CiscoM"}, //E4:55:A8 Cisco Meraki
+  {{0x98, 0xFC, 0x11}, "CiscoL"}, //98:FC:11 Cisco-Linksys, LLC
+  {{0x70, 0xDF, 0x2F}, "Cisco"}, //70:DF:2F Cisco Systems, Inc
   {{0x00, 0xE0, 0x4C}, "Realtk"},
   {{0x00, 0x16, 0x3E}, "Xensrc"},
   {{0x00, 0x50, 0x56}, "VMware"},
@@ -250,8 +265,6 @@ const VendorOUI vendorTable[] = {
   {{0x4C, 0x23, 0x1A}, "ExtNet"},
   {{0x00, 0x00, 0x78}, "Labtam"},
   {{0xB0, 0x99, 0xD7}, "Samsng"},
-  {{0xDC, 0x46, 0x28}, "Intel"},
-  {{0xF4, 0xA4, 0x75}, "Intel"},
   {{0x00, 0x37, 0x2A}, "WiFiAl"},
   {{0x50, 0x6F, 0x9A}, "WiFiAl"},
   {{0x00, 0x24, 0xE2}, "Hasgwa"},
@@ -260,6 +273,7 @@ const VendorOUI vendorTable[] = {
   {{0x44, 0x48, 0xB9}, "MitStr"},
   {{0xCC, 0xD4, 0xA1}, "MitStr"},
   {{0x2C, 0x96, 0x82}, "MitStr"},
+  {{0xE4, 0xAB, 0x89}, "MtrStr"}, //E4:AB:89 MitraStar Technology Corp.
   {{0xF4, 0x6F, 0xED}, "Fibhom"},
   {{0xF8, 0x55, 0xCD}, "Viston"},
   {{0xF4, 0x95, 0x1B}, "HefeiR"},
@@ -290,6 +304,7 @@ const VendorOUI vendorTable[] = {
   {{0x34, 0x21, 0x09}, "Jensen"},
   {{0xEC, 0x6C, 0x9A}, "Arcady"},
   {{0x18, 0x82, 0x8C}, "Arcady"}, //Arcadyan Corporation
+  {{0xA8, 0xA2, 0x37}, "Arcady"}, //A8:A2:37 Arcadyan Corporation
   {{0x5C, 0x7B, 0x5C}, "Shenzn"},
   {{0x2C, 0xEC, 0xF7}, "Shenzn"},
   {{0xC4, 0x3C, 0xB0}, "ShenZn"}, //Shenzhen Bilian Electronic Co.，Ltd
@@ -299,12 +314,18 @@ const VendorOUI vendorTable[] = {
   {{0x8C, 0x3B, 0x4A}, "UGSICo"}, //Universal Global Scientific Industrial Co., Ltd.
   {{0x80, 0x78, 0x71}, "Askey"}, //Askey Computer Corp
   {{0xF4, 0x52, 0x46}, "Askey"}, //Askey Computer Corp
+  {{0xE8, 0xD1, 0x1B}, "Askey"}, //E8:D1:1B Askey Computer Corp
   {{0xB4, 0x8C, 0x9D}, "Azure"}, //AzureWave Tech Inc.
+  {{0x90, 0xE8, 0x68}, "AzureW"}, //AzureWave Technology Inc.
+  {{0xE8, 0xFB, 0x1C}, "AzureW"}, //E8:FB:1C AzureWave Technology Inc.
+  {{0xF0, 0x03, 0x8C}, "AzWave"}, //F0:03:8C AzureWave Technology Inc.
   {{0x90, 0xE4, 0x68}, "Guangz"}, //Guangzhou Shiyuan Electronic Technology Company Limited
   {{0xCC, 0x5E, 0xF8}, "CNeTec"}, //Cloud Network Technology Singapore Pte. Ltd.
   {{0x30, 0x03, 0xC8}, "CNeTec"}, //Cloud Network Technology Singapore Pte. Ltd.
   {{0xB4, 0xE6, 0x2A}, "LGInno"}, //LG Innotek
-  {{0xFC, 0x15, 0xB4}, "LGInno"}, //Hewlett Packard
+  {{0xA4, 0x36, 0xC7}, "LGInno"}, //LG Innotek
+  {{0xD4, 0x8D, 0x26}, "LGInno"}, //LG Innotek
+  {{0xFC, 0x15, 0xB4}, "HP"}, //Hewlett Packard
   {{0xE4, 0x7D, 0xEB}, "ShanIT"}, //Shanghai Notion Information Technology CO.,LTD.
   {{0xAC, 0xC3, 0x58}, "CzAuto"}, //Continental Automotive Czech Republic s.r.o.
   {{0xEC, 0x6C, 0x9A}, "Arcady"}, //EC:6C:9A Arcadyan Corporation
@@ -314,57 +335,51 @@ const VendorOUI vendorTable[] = {
   {{0x04, 0x79, 0x70}, "Huawei"}, //Huawei Technologies Co.,Ltd
   {{0xA8, 0x31, 0x62}, "HHNTec"}, //Hangzhou Huacheng Network Technology Co.,Ltd
   {{0x28, 0x56, 0x3A}, "Fibhom"}, //Fiberhome Telecommunication Technologies Co.,LTD
-  {{0x10, 0x27, 0xF5}, "TPLink"}, //TP-Link Systems Inc
+  {{0xB4, 0x60, 0x8C}, "Fibhom"}, //B4:60:8C Fiberhome Telecommunication Technologies Co.,LTD
   {{0x70, 0xF1, 0x1C}, "ShzOge"}, //Shenzhen Ogemray Technology Co.,Ltd
   {{0xB8, 0x94, 0xE7}, "Xiaomi"}, //Xiaomi Communications Co Ltd
+  {{0xDC, 0x46, 0x28}, "Intel"},
+  {{0xF4, 0xA4, 0x75}, "Intel"},
   {{0xF4, 0x7B, 0x09}, "Intel"}, //Intel Corporate
   {{0x98, 0x5F, 0x41}, "Intel"}, //Intel Corporate
   {{0x04, 0xCF, 0x4B}, "Intel"}, //Intel Corporate
+  {{0xF0, 0xB6, 0x1E}, "Intel"}, //F0:B6:1E Intel Corporate
+  {{0xC8, 0x58, 0xC0}, "Intel"}, //C8:58:C0 Intel Corporate
+  {{0x14, 0xF6, 0xD8}, "Intel"}, //14:F6:D8 Intel Corporate
+  {{0x14, 0x75, 0x5B}, "Intel"}, //14:75:5B Intel Corporate
+  {{0x70, 0xCD, 0x0D}, "Intel"}, //70:CD:0D Intel Corporate
+  {{0x5C, 0x80, 0xB6}, "Intel"}, //5C:80:B6 Intel Corporate
+  {{0xC8, 0x58, 0xC0}, "Intel"}, //C8:58:C0 Intel Corporate
   {{0xB0, 0x52, 0x16}, "HonHai"}, //Hon Hai Precision Ind. Co.,Ltd.
   {{0xB4, 0x4C, 0x3B}, "ZDahua"}, //Zhejiang Dahua Technology Co., Ltd.
+  {{0xE4, 0x24, 0x6C}, "ZDahua"}, //E4:24:6C Zhejiang Dahua Technology Co., Ltd.
+  {{0xC4, 0xAA, 0xC4}, "ZDahua"}, //C4:AA:C4 Zhejiang Dahua Technology Co., Ltd.
   {{0x6C, 0x22, 0x1A}, "AltoBm"}, //AltoBeam Inc.
-  {{0x90, 0xE8, 0x68}, "AzureW"}, //AzureWave Technology Inc.
+  {{0x4C, 0x60, 0xBA}, "AltoBm"}, //4C:60:BA AltoBeam Inc.
   {{0x20, 0xF4, 0x78}, "Xiaomi"}, //20:F4:78 Xiaomi Communications Co Ltd
   {{0x7C, 0xB3, 0x7B}, "Qngdao"}, //7C:B3:7B Qingdao Intelligent&Precise Electronics Co.,Ltd.
   {{0x10, 0x59, 0x32}, "Roku"}, //Roku, Inc
-  {{0x34, 0x21, 0x09}, "AzureW"}, //34:21:09 Jensen Scandinavia AS
+  {{0x34, 0x21, 0x09}, "Jensen"}, //34:21:09 Jensen Scandinavia AS
   {{0xF0, 0xC8, 0x14}, "ShzBil"}, //F0:C8:14 Shenzhen Bilian Electronic Co.，Ltd
   {{0x00, 0x08, 0x22}, "InPro"}, //00:08:22 InPro Comm
   {{0x54, 0xBA, 0xD6}, "Huawei"}, //54:BA:D6 Huawei Technologies Co.,Ltd
   {{0x60, 0x23, 0xA4}, "SchnAI"}, //60:23:A4 Sichuan AI-Link Technology Co., Ltd.
   {{0x7C, 0xFC, 0x3C}, "Viston"}, //7C:FC:3C Visteon Corporation
   {{0x24, 0x46, 0xC8}, "Motrla"}, //24:46:C8 Motorola Mobility LLC, a Lenovo Company
-  {{0xB0, 0x95, 0x75}, "TpLink"}, //Tp-Link Technologies Co.,Ltd.
-  {{0xE4, 0x55, 0xA8}, "CiscoM"}, //E4:55:A8 Cisco Meraki
-//38:F9:F5 Garmin International
-//5C:80:B6 Intel Corporate
-//C8:58:C0 Intel Corporate
-//98:FC:11 Cisco-Linksys, LLC
-//60:AB:67 Xiaomi Communications Co Ltd
-//F0:B6:1E Intel Corporate
-//14:F6:D8 Intel Corporate
-//14:75:5B Intel Corporate
-//70:CD:0D Intel Corporate
-//A8:81:7E Apple, Inc.
-//C4:14:11 Apple, Inc.
-//60:0F:6B Apple, Inc.
-//70:DF:2F Cisco Systems, Inc
-//E8:FB:1C AzureWave Technology Inc.
-//D0:21:F9 Ubiquiti Inc
-//FC:EC:DA Ubiquiti Inc
-//1C:AF:4A Samsung Electronics Co.,Ltd
-//E8:A0:CD Nintendo Co.,Ltd
-//6C:56:97 Amazon Technologies Inc.
-//E4:24:6C Zhejiang Dahua Technology Co., Ltd.
-//E4:AB:89 MitraStar Technology Corp.
-//FC:D7:49 Amazon Technologies Inc.
-//D0:A4:6F China Dragon Technology Limited
-//4C:60:BA AltoBeam Inc.
-//BC:FF:4D Espressif Inc.
-//E8:D1:1B Askey Computer Corp
-//48:5F:2D Amazon Technologies Inc.
-//F0:03:8C AzureWave Technology Inc.
-//94:04:E3 Vantiva USA LLC
+  {{0x38, 0xF9, 0xF5}, "Garmin"}, //38:F9:F5 Garmin International
+  {{0x60, 0xAB, 0x67}, "Xiaomi"}, //60:AB:67 Xiaomi Communications Co Ltd
+  {{0x94, 0xEC, 0x13}, "HEzviz"}, //94:EC:13 Hangzhou Ezviz Software Co.,Ltd.
+  {{0xE8, 0xA0, 0xCD}, "Nintnd"}, //E8:A0:CD Nintendo Co.,Ltd
+  {{0x6C, 0x56, 0x97}, "Amazon"}, //6C:56:97 Amazon Technologies Inc.
+  {{0xFC, 0xD7, 0x49}, "Amazon"}, //FC:D7:49 Amazon Technologies Inc.
+  {{0x48, 0x5F, 0x2D}, "Amazon"}, //48:5F:2D Amazon Technologies Inc.
+  {{0x4C, 0x53, 0xFD}, "Amazon"}, //4C:53:FD Amazon Technologies Inc.
+  {{0xD0, 0xA4, 0x6F}, "Dragon"}, //D0:A4:6F China Dragon Technology Limited
+  {{0xBC, 0xFF, 0x4D}, "Esprsf"}, //BC:FF:4D Espressif Inc.
+  {{0xBC, 0xDD, 0xC2}, "EspMe"}, //BC:DD:C2:CC:B5:70 Espressif Inc. (probably me)
+  {{0x94, 0x04, 0xE3}, "Vantiv"}, //94:04:E3 Vantiva USA LLC
+  {{0x20, 0x28, 0xBC}, "Vision"}, //20:28:BC Visionscape Co,. Ltd.
+
 };
 
 const size_t vendorCount = sizeof(vendorTable) / sizeof(vendorTable[0]);

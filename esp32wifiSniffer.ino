@@ -261,6 +261,8 @@ void setup() {
   //filt.filter_mask = WIFI_PROMIS_FILTER_MASK_ALL; //Captures everything but noisy, garbled
   esp_wifi_set_promiscuous_filter(&filt);
   esp_wifi_set_mode(WIFI_MODE_NULL);
+  delay(10);                  // Give it a moment (esp_wifi_init is async)
+  Serial.println(WiFi.macAddress());
   esp_wifi_start();
   esp_wifi_set_promiscuous_rx_cb(&sniffer_callback);
   esp_wifi_set_promiscuous(true);
@@ -323,7 +325,6 @@ void loop() {
     scanStart = now;
     channelIndex = 0;
     lastChannelSwitch = now;
-    Serial.println(WiFi.macAddress());  // Should match BC:FF:4D:91:28:B6
     esp_wifi_start();
     esp_wifi_set_promiscuous(true);
     esp_wifi_set_channel(CHANNELS[0], WIFI_SECOND_CHAN_NONE);
