@@ -323,6 +323,7 @@ void loop() {
     scanStart = now;
     channelIndex = 0;
     lastChannelSwitch = now;
+    Serial.println(WiFi.macAddress());  // Should match BC:FF:4D:91:28:B6
     esp_wifi_start();
     esp_wifi_set_promiscuous(true);
     esp_wifi_set_channel(CHANNELS[0], WIFI_SECOND_CHAN_NONE);

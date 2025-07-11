@@ -352,6 +352,19 @@ const VendorOUI vendorTable[] = {
 //E8:FB:1C AzureWave Technology Inc.
 //D0:21:F9 Ubiquiti Inc
 //FC:EC:DA Ubiquiti Inc
+//1C:AF:4A Samsung Electronics Co.,Ltd
+//E8:A0:CD Nintendo Co.,Ltd
+//6C:56:97 Amazon Technologies Inc.
+//E4:24:6C Zhejiang Dahua Technology Co., Ltd.
+//E4:AB:89 MitraStar Technology Corp.
+//FC:D7:49 Amazon Technologies Inc.
+//D0:A4:6F China Dragon Technology Limited
+//4C:60:BA AltoBeam Inc.
+//BC:FF:4D Espressif Inc.
+//E8:D1:1B Askey Computer Corp
+//48:5F:2D Amazon Technologies Inc.
+//F0:03:8C AzureWave Technology Inc.
+//94:04:E3 Vantiva USA LLC
 };
 
 const size_t vendorCount = sizeof(vendorTable) / sizeof(vendorTable[0]);
