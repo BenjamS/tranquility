@@ -228,6 +228,7 @@ const VendorOUI vendorTable[] = {
   {{0xDC, 0xA6, 0x32}, "RaspPi"},
   {{0x00, 0x1A, 0x11}, "Google"},
   {{0x88, 0x32, 0x9B}, "SmsgTh"},
+  {{0xBC, 0x8C, 0xCD}, "SmsgTh"}, // BC:8C:CD Samsung Electro-Mechanics(Thailand)
   {{0xA0, 0xD0, 0x5B}, "Smsung"},
   {{0x64, 0x1C, 0xAE}, "Smsung"},
   {{0xCC, 0x6E, 0xA4}, "Smsung"}, //Samsung Electronics Co.,Ltd
@@ -243,6 +244,7 @@ const VendorOUI vendorTable[] = {
   {{0xA8, 0x6E, 0x84}, "TPLink"}, //TP-Link Systems Inc
   {{0xB0, 0x95, 0x75}, "TpLink"}, //Tp-Link Technologies Co.,Ltd.
   {{0x10, 0x27, 0xF5}, "TPLink"}, //TP-Link Systems Inc
+  {{0x50, 0x91, 0xE3}, "TPLink"}, // 50:91:E3 TP-Link Systems Inc
   {{0xA4, 0x77, 0x33}, "Google"},
   {{0x00, 0x11, 0x22}, "CIMSYS"},
   {{0xF0, 0x9F, 0xC2}, "Ubiqui"},
@@ -315,16 +317,23 @@ const VendorOUI vendorTable[] = {
   {{0x80, 0x78, 0x71}, "Askey"}, //Askey Computer Corp
   {{0xF4, 0x52, 0x46}, "Askey"}, //Askey Computer Corp
   {{0xE8, 0xD1, 0x1B}, "Askey"}, //E8:D1:1B Askey Computer Corp
-  {{0xB4, 0x8C, 0x9D}, "Azure"}, //AzureWave Tech Inc.
+  {{0x08, 0x33, 0xED}, "Askey"}, // 08:33:ED Askey Computer Corp
+  {{0xC8, 0xB4, 0x22}, "Askey"}, // C8:B4:22 Askey Computer Corp
+  {{0xFC, 0x12, 0x63}, "Askey"}, // FC:12:63 Askey Computer Corp
+  {{0x78, 0x29, 0xED}, "Askey"}, // 78:29:ED Askey Computer Corp
+  {{0xB4, 0x8C, 0x9D}, "AzureW"}, //AzureWave Tech Inc.
   {{0x90, 0xE8, 0x68}, "AzureW"}, //AzureWave Technology Inc.
   {{0xE8, 0xFB, 0x1C}, "AzureW"}, //E8:FB:1C AzureWave Technology Inc.
-  {{0xF0, 0x03, 0x8C}, "AzWave"}, //F0:03:8C AzureWave Technology Inc.
+  {{0xF0, 0x03, 0x8C}, "AzureW"}, //F0:03:8C AzureWave Technology Inc.
+  {{0x74, 0xC6, 0x3B}, "AzureW"}, // 74:C6:3B AzureWave Technology Inc.
+  {{0x94, 0xBB, 0x43}, "AzureW"}, // 94:BB:43 AzureWave Technology Inc.
   {{0x90, 0xE4, 0x68}, "Guangz"}, //Guangzhou Shiyuan Electronic Technology Company Limited
   {{0xCC, 0x5E, 0xF8}, "CNeTec"}, //Cloud Network Technology Singapore Pte. Ltd.
   {{0x30, 0x03, 0xC8}, "CNeTec"}, //Cloud Network Technology Singapore Pte. Ltd.
   {{0xB4, 0xE6, 0x2A}, "LGInno"}, //LG Innotek
   {{0xA4, 0x36, 0xC7}, "LGInno"}, //LG Innotek
   {{0xD4, 0x8D, 0x26}, "LGInno"}, //LG Innotek
+  {{0x40, 0x2F, 0x86}, "LGInno"},  // 40:2F:86 LG Innotek
   {{0xFC, 0x15, 0xB4}, "HP"}, //Hewlett Packard
   {{0xE4, 0x7D, 0xEB}, "ShanIT"}, //Shanghai Notion Information Technology CO.,LTD.
   {{0xAC, 0xC3, 0x58}, "CzAuto"}, //Continental Automotive Czech Republic s.r.o.
@@ -333,6 +342,7 @@ const VendorOUI vendorTable[] = {
   {{0x00, 0x09, 0x0F}, "FrtNet"}, //Fortinet, Inc.
   {{0xF0, 0xD4, 0xE2}, "Dell"}, //Dell Inc.
   {{0x04, 0x79, 0x70}, "Huawei"}, //Huawei Technologies Co.,Ltd
+  {{0x14, 0x77, 0x40}, "Huawei"}, // 14:77:40 Huawei Device Co., Ltd.
   {{0xA8, 0x31, 0x62}, "HHNTec"}, //Hangzhou Huacheng Network Technology Co.,Ltd
   {{0x28, 0x56, 0x3A}, "Fibhom"}, //Fiberhome Telecommunication Technologies Co.,LTD
   {{0xB4, 0x60, 0x8C}, "Fibhom"}, //B4:60:8C Fiberhome Telecommunication Technologies Co.,LTD
@@ -358,6 +368,7 @@ const VendorOUI vendorTable[] = {
   {{0x4C, 0x60, 0xBA}, "AltoBm"}, //4C:60:BA AltoBeam Inc.
   {{0x20, 0xF4, 0x78}, "Xiaomi"}, //20:F4:78 Xiaomi Communications Co Ltd
   {{0x7C, 0xB3, 0x7B}, "Qngdao"}, //7C:B3:7B Qingdao Intelligent&Precise Electronics Co.,Ltd.
+  {{0x80, 0xCB, 0xBC}, "Qngdao"},    // 80:CB:BC Qingdao Intelligent&Precise Electronics Co.,Ltd.
   {{0x10, 0x59, 0x32}, "Roku"}, //Roku, Inc
   {{0x34, 0x21, 0x09}, "Jensen"}, //34:21:09 Jensen Scandinavia AS
   {{0xF0, 0xC8, 0x14}, "ShzBil"}, //F0:C8:14 Shenzhen Bilian Electronic Co.，Ltd
@@ -374,11 +385,19 @@ const VendorOUI vendorTable[] = {
   {{0xFC, 0xD7, 0x49}, "Amazon"}, //FC:D7:49 Amazon Technologies Inc.
   {{0x48, 0x5F, 0x2D}, "Amazon"}, //48:5F:2D Amazon Technologies Inc.
   {{0x4C, 0x53, 0xFD}, "Amazon"}, //4C:53:FD Amazon Technologies Inc.
+  {{0xAC, 0x41, 0x6A}, "Amazon"}, // AC:41:6A Amazon Technologies Inc.
   {{0xD0, 0xA4, 0x6F}, "Dragon"}, //D0:A4:6F China Dragon Technology Limited
   {{0xBC, 0xFF, 0x4D}, "Esprsf"}, //BC:FF:4D Espressif Inc.
   {{0xBC, 0xDD, 0xC2}, "EspMe"}, //BC:DD:C2:CC:B5:70 Espressif Inc. (probably me)
   {{0x94, 0x04, 0xE3}, "Vantiv"}, //94:04:E3 Vantiva USA LLC
+  {{0xE0, 0x37, 0x17}, "Vantiv"}, // E0:37:17 Vantiva USA LLC
   {{0x20, 0x28, 0xBC}, "Vision"}, //20:28:BC Visionscape Co,. Ltd.
+  {{0x88, 0xEF, 0x16}, "Comscp"},    // 88:EF:16 Commscope
+  {{0x24, 0x18, 0xC6}, "FnLink"},     // 24:18:C6 Hunan Fn-Link Technology Limited
+  {{0x30, 0x1F, 0x48}, "ZTE"},        // 30:1F:48 zte corporation
+  {{0x9C, 0x95, 0x61}, "Gaoshn"},  // 9C:95:61 Hui Zhou Gaoshengda Technology Co.,LTD
+  {{0xB8, 0xAB, 0x62}, "Gaoshn"},  // B8:AB:62 Hui Zhou Gaoshengda Technology Co.,LTD
+  {{0xC8, 0x08, 0xE9}, "LGElec"},     // C8:08:E9 LG Electronics
 
 };
 
