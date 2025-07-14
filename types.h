@@ -234,6 +234,7 @@ const VendorOUI vendorTable[] = {
   {{0xCC, 0x6E, 0xA4}, "Smsung"}, //Samsung Electronics Co.,Ltd
   {{0xD4, 0x11, 0xA3}, "Smsung"}, //Samsung Electronics Co.,Ltd
   {{0x1C, 0xAF, 0x4A}, "Samsng"}, //1C:AF:4A Samsung Electronics Co.,Ltd
+  {{0x9C, 0x8C, 0x6E}, "Samsng"}, // 9C:8C:6E Samsung Electronics Co.,Ltd
   {{0xD8, 0x0D, 0x17}, "TpLink"},
   {{0xEC, 0x75, 0x0C}, "TpLink"},
   {{0x00, 0x1D, 0x0F}, "TpLink"},
@@ -280,6 +281,7 @@ const VendorOUI vendorTable[] = {
   {{0xF8, 0x55, 0xCD}, "Viston"},
   {{0xF4, 0x95, 0x1B}, "HefeiR"},
   {{0x58, 0x9B, 0xF7}, "HefeiR"},
+  {{0x14, 0x82, 0x5B}, "HefeiR"}, // 14:82:5B Hefei Radio Communication Technology Co., Ltd
   {{0x00, 0x00, 0x0F}, "Next"},
   {{0x00, 0x00, 0xDD}, "TclInc"},
   {{0x00, 0x01, 0x01}, "Privat"},
@@ -334,6 +336,7 @@ const VendorOUI vendorTable[] = {
   {{0xA4, 0x36, 0xC7}, "LGInno"}, //LG Innotek
   {{0xD4, 0x8D, 0x26}, "LGInno"}, //LG Innotek
   {{0x40, 0x2F, 0x86}, "LGInno"},  // 40:2F:86 LG Innotek
+  {{0xC8, 0x08, 0xE9}, "LGElec"}, // C8:08:E9 LG Electronics
   {{0xFC, 0x15, 0xB4}, "HP"}, //Hewlett Packard
   {{0xE4, 0x7D, 0xEB}, "ShanIT"}, //Shanghai Notion Information Technology CO.,LTD.
   {{0xAC, 0xC3, 0x58}, "CzAuto"}, //Continental Automotive Czech Republic s.r.o.
@@ -368,7 +371,7 @@ const VendorOUI vendorTable[] = {
   {{0x4C, 0x60, 0xBA}, "AltoBm"}, //4C:60:BA AltoBeam Inc.
   {{0x20, 0xF4, 0x78}, "Xiaomi"}, //20:F4:78 Xiaomi Communications Co Ltd
   {{0x7C, 0xB3, 0x7B}, "Qngdao"}, //7C:B3:7B Qingdao Intelligent&Precise Electronics Co.,Ltd.
-  {{0x80, 0xCB, 0xBC}, "Qngdao"},    // 80:CB:BC Qingdao Intelligent&Precise Electronics Co.,Ltd.
+  {{0x80, 0xCB, 0xBC}, "Qngdao"}, // 80:CB:BC Qingdao Intelligent&Precise Electronics Co.,Ltd.
   {{0x10, 0x59, 0x32}, "Roku"}, //Roku, Inc
   {{0x34, 0x21, 0x09}, "Jensen"}, //34:21:09 Jensen Scandinavia AS
   {{0xF0, 0xC8, 0x14}, "ShzBil"}, //F0:C8:14 Shenzhen Bilian Electronic Co.，Ltd
@@ -392,13 +395,16 @@ const VendorOUI vendorTable[] = {
   {{0x94, 0x04, 0xE3}, "Vantiv"}, //94:04:E3 Vantiva USA LLC
   {{0xE0, 0x37, 0x17}, "Vantiv"}, // E0:37:17 Vantiva USA LLC
   {{0x20, 0x28, 0xBC}, "Vision"}, //20:28:BC Visionscape Co,. Ltd.
-  {{0x88, 0xEF, 0x16}, "Comscp"},    // 88:EF:16 Commscope
-  {{0x24, 0x18, 0xC6}, "FnLink"},     // 24:18:C6 Hunan Fn-Link Technology Limited
-  {{0x30, 0x1F, 0x48}, "ZTE"},        // 30:1F:48 zte corporation
-  {{0x9C, 0x95, 0x61}, "Gaoshn"},  // 9C:95:61 Hui Zhou Gaoshengda Technology Co.,LTD
-  {{0xB8, 0xAB, 0x62}, "Gaoshn"},  // B8:AB:62 Hui Zhou Gaoshengda Technology Co.,LTD
-  {{0xC8, 0x08, 0xE9}, "LGElec"},     // C8:08:E9 LG Electronics
-
+  {{0x88, 0xEF, 0x16}, "Comscp"}, // 88:EF:16 Commscope
+  {{0x6C, 0x63, 0x9C}, "Comscp"}, // 6C:63:9C Commscope
+  {{0x80, 0x5D, 0xD4}, "Comscp"}, // B0:5D:D4 Commscope
+  {{0x24, 0x18, 0xC6}, "FnLink"}, // 24:18:C6 Hunan Fn-Link Technology Limited
+  {{0x30, 0x1F, 0x48}, "ZTE"},    // 30:1F:48 zte corporation
+  {{0x9C, 0x95, 0x61}, "Gaoshn"}, // 9C:95:61 Hui Zhou Gaoshengda Technology Co.,LTD
+  {{0xB8, 0xAB, 0x62}, "Gaoshn"}, // B8:AB:62 Hui Zhou Gaoshengda Technology Co.,LTD
+  {{0x7C, 0x27, 0xBC}, "Gaoshn"}, // 7C:27:BC Hui Zhou Gaoshengda Technology Co.,LTD
+  {{0x54, 0x47, 0xCC}, "Sgecom"}, // 54:47:CC Sagemcom Broadband SAS
+  {{0xA8, 0x80, 0x55}, "TuyaSt"}, // A8:80:55 Tuya Smart Inc.
 };
 
 const size_t vendorCount = sizeof(vendorTable) / sizeof(vendorTable[0]);
