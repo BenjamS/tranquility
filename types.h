@@ -405,6 +405,13 @@ const VendorOUI vendorTable[] = {
   {{0x7C, 0x27, 0xBC}, "Gaoshn"}, // 7C:27:BC Hui Zhou Gaoshengda Technology Co.,LTD
   {{0x54, 0x47, 0xCC}, "Sgecom"}, // 54:47:CC Sagemcom Broadband SAS
   {{0xA8, 0x80, 0x55}, "TuyaSt"}, // A8:80:55 Tuya Smart Inc.
+
+//  04:68:65 Apple, Inc.
+//04:D6:AA Samsung Electro-Mechanics(Thailand)
+//0C:6A:C4 Apple, Inc.
+//30:CD:A7 Samsung Electronics Co.,Ltd
+//30:F6:EF Intel Corporate
+//50:8E:49 Xiaomi Communications Co Ltd
 };
 
 const size_t vendorCount = sizeof(vendorTable) / sizeof(vendorTable[0]);
