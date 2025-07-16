@@ -412,6 +412,14 @@ const VendorOUI vendorTable[] = {
 //30:CD:A7 Samsung Electronics Co.,Ltd
 //30:F6:EF Intel Corporate
 //50:8E:49 Xiaomi Communications Co Ltd
+//00:05:32 Cisco Systems, Inc
+//00:C3:0A Xiaomi Communications Co Ltd
+//0C:6A:C4 Apple, Inc.
+//0C:80:63 Tp-Link Technologies Co.,Ltd.
+//98:FC:11 Cisco-Linksys, LLC
+//BC:32:5F Zhejiang Dahua Technology Co., Ltd.
+//FC:5F:49 Zhejiang Dahua Technology Co., Ltd.
+
 };
 
 const size_t vendorCount = sizeof(vendorTable) / sizeof(vendorTable[0]);
